@@ -33,6 +33,13 @@ location that cmake's `find_package` searches.
 uv pip install .
 ```
 
+For faster local builds when you do not need cloud filesystem support, disable
+GCS and S3 at configure time:
+
+```sh
+CMAKE_ARGS="-DBAGZ_ENABLE_GCS=OFF -DBAGZ_ENABLE_S3=OFF" uv pip install .
+```
+
 On Linux you can install the latest version from PyPI.
 
 ```sh

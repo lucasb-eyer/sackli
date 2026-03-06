@@ -17,6 +17,8 @@ project(bagz LANGUAGES CXX)
 
 include(FetchContent)
 
+option(BAGZ_ENABLE_GCS "Build Google Cloud Storage filesystem support" ON)
+option(BAGZ_ENABLE_S3 "Build Amazon S3 filesystem support" ON)
 option(BUILD_SHARED_LIBS ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -31,8 +33,12 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -w -Wno-dev")
 include(cmake/third_party_absl.cmake)
 include(cmake/third_party_pybind11.cmake)
 include(cmake/third_party_zstd.cmake)
-include(cmake/third_party_gcs.cmake)
-include(cmake/third_party_aws.cmake)
+if(BAGZ_ENABLE_GCS)
+  include(cmake/third_party_gcs.cmake)
+endif()
+if(BAGZ_ENABLE_S3)
+  include(cmake/third_party_aws.cmake)
+endif()
 
 # Restore original CXX_FLAGS
 set(CMAKE_CXX_FLAGS "${SAVED_CMAKE_CXX_FLAGS}")
@@ -94,62 +100,85 @@ bagz_cc_library(
 file(GLOB bagz_file_system_gcs_sources "src/file/file_systems/gcs/*.cc")
 file(GLOB bagz_file_system_gcs_headers "src/file/file_systems/gcs/*.h")
 
-bagz_cc_library(
-  bagz_file_system_gcs
-  SOURCES ${bagz_file_system_gcs_sources}
-  HEADERS ${bagz_file_system_gcs_headers}
-  DEPS
-    absl::log
-    absl::status
-    absl::statusor
-    absl::strings
-    bagz_file_system
-    bagz_internal
-    google-cloud-cpp::storage
-)
+if(BAGZ_ENABLE_GCS)
+  bagz_cc_library(
+    bagz_file_system_gcs
+    SOURCES ${bagz_file_system_gcs_sources}
+    HEADERS ${bagz_file_system_gcs_headers}
+    DEPS
+      absl::log
+      absl::status
+      absl::statusor
+      absl::strings
+      bagz_file_system
+      bagz_internal
+      google-cloud-cpp::storage
+  )
+endif()
 
 file(GLOB bagz_file_system_s3_sources "src/file/file_systems/s3/*.cc")
 file(GLOB bagz_file_system_s3_headers "src/file/file_systems/s3/*.h")
 
-bagz_cc_library(
-  bagz_file_system_s3
-  SOURCES ${bagz_file_system_s3_sources}
-  HEADERS ${bagz_file_system_s3_headers}
-  DEPS
-    absl::log
-    absl::status
-    absl::statusor
-    absl::strings
-    bagz_file_system
-    bagz_internal
-    aws-cpp-sdk-s3
-    aws-cpp-sdk-core
-    GTest::gtest
-    GTest::gtest_main
-    GTest::gmock
-)
+if(BAGZ_ENABLE_S3)
+  bagz_cc_library(
+    bagz_file_system_s3
+    SOURCES ${bagz_file_system_s3_sources}
+    HEADERS ${bagz_file_system_s3_headers}
+    DEPS
+      absl::log
+      absl::status
+      absl::statusor
+      absl::strings
+      bagz_file_system
+      bagz_internal
+      aws-cpp-sdk-s3
+      aws-cpp-sdk-core
+      GTest::gtest
+      GTest::gtest_main
+      GTest::gmock
+  )
+endif()
 
 file(GLOB bagz_file_sources "src/file/*.cc"  "src/file/registry/*.cc")
 file(GLOB bagz_file_headers "src/file/*.h" "src/file/registry/*.h")
+
+set(
+  bagz_file_deps
+  absl::log
+  absl::status
+  absl::statusor
+  absl::strings
+  bagz_internal
+  bagz_file_system
+  bagz_file_system_posix
+)
+
+if(BAGZ_ENABLE_GCS)
+  list(APPEND bagz_file_deps bagz_file_system_gcs google-cloud-cpp::storage)
+endif()
+
+if(BAGZ_ENABLE_S3)
+  list(APPEND bagz_file_deps bagz_file_system_s3 aws-cpp-sdk-s3 aws-cpp-sdk-core)
+endif()
 
 bagz_cc_library(
   bagz_file
   SOURCES ${bagz_file_sources}
   HEADERS ${bagz_file_headers}
-  DEPS
-    absl::log
-    absl::status
-    absl::statusor
-    absl::strings
-    bagz_internal
-    bagz_file_system
-    bagz_file_system_posix
-    bagz_file_system_gcs
-    bagz_file_system_s3
-    google-cloud-cpp::storage
-    aws-cpp-sdk-s3
-    aws-cpp-sdk-core
+  DEPS ${bagz_file_deps}
 )
+
+if(BAGZ_ENABLE_GCS)
+  target_compile_definitions(bagz_file PRIVATE BAGZ_ENABLE_GCS=1)
+else()
+  target_compile_definitions(bagz_file PRIVATE BAGZ_ENABLE_GCS=0)
+endif()
+
+if(BAGZ_ENABLE_S3)
+  target_compile_definitions(bagz_file PRIVATE BAGZ_ENABLE_S3=1)
+else()
+  target_compile_definitions(bagz_file PRIVATE BAGZ_ENABLE_S3=0)
+endif()
 
 file(GLOB bagz_core_sources "src/*.cc")
 file(GLOB bagz_core_headers "src/*.h")
