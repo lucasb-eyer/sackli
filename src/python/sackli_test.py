@@ -24,7 +24,7 @@ from absl.testing import absltest
 from absl.testing import parameterized
 import numpy as np
 
-import bagz
+import sackli
 
 
 _NUM_RECORDS = 20
@@ -32,7 +32,7 @@ _STRESS_RECORDS = 257
 _THREAD_TEST_TIMEOUT_SECONDS = 120
 
 Compression: TypeAlias = (
-    bagz.CompressionAutoDetect | bagz.CompressionNone | bagz.CompressionZstd
+    sackli.CompressionAutoDetect | sackli.CompressionNone | sackli.CompressionZstd
 )
 
 
@@ -82,7 +82,7 @@ def _generate_stress_records(num_records: int) -> list[bytes]:
 
 
 def _write_records(path: pathlib.Path, records: Sequence[bytes]) -> None:
-  with bagz.Writer(path) as writer:
+  with sackli.Writer(path) as writer:
     for record in records:
       writer.write(record)
 
@@ -100,11 +100,11 @@ class BagTest(parameterized.TestCase):
     file = pathlib.Path(self.create_tempdir()) / 'data.bag'
     records = list(_generate_records(_NUM_RECORDS))
     num_bytes = 0
-    with bagz.Writer(file) as writer:
+    with sackli.Writer(file) as writer:
       for d in records:
         num_bytes += len(d)
         writer.write(d)
-    reader = bagz.Reader(file)
+    reader = sackli.Reader(file)
     self.assertEqual(list(reader), records)
     # Uncompressed records:
     self.assertEqual(file.stat().st_size, num_bytes + len(records) * 8)
@@ -117,27 +117,27 @@ class BagTest(parameterized.TestCase):
       name=('data.bagz', 'data.bag'),
       limits_placement=(
           None,
-          bagz.LimitsPlacement.TAIL,
-          bagz.LimitsPlacement.SEPARATE,
+          sackli.LimitsPlacement.TAIL,
+          sackli.LimitsPlacement.SEPARATE,
       ),
       compression=(
           None,
-          bagz.CompressionAutoDetect(),
-          bagz.CompressionNone(),
-          bagz.CompressionZstd(level=3),
+          sackli.CompressionAutoDetect(),
+          sackli.CompressionNone(),
+          sackli.CompressionZstd(level=3),
       ),
       limits_storage=(
           None,
-          bagz.LimitsStorage.IN_MEMORY,
-          bagz.LimitsStorage.ON_DISK,
+          sackli.LimitsStorage.IN_MEMORY,
+          sackli.LimitsStorage.ON_DISK,
       ),
   )
   def test_write_read(
       self,
       name: str,
-      limits_placement: bagz.LimitsPlacement | None,
+      limits_placement: sackli.LimitsPlacement | None,
       compression: Compression | None,
-      limits_storage: bagz.LimitsStorage | None,
+      limits_storage: sackli.LimitsStorage | None,
   ) -> None:
     file = pathlib.Path(self.create_tempdir()) / name
     records = list(_generate_records(_NUM_RECORDS))
@@ -146,13 +146,13 @@ class BagTest(parameterized.TestCase):
         compression=compression,
     )
     writer_options = {k: v for k, v in writer_options.items() if v is not None}
-    with bagz.Writer(file, bagz.Writer.Options(**writer_options)) as writer:
+    with sackli.Writer(file, sackli.Writer.Options(**writer_options)) as writer:
       for d in records:
         writer.write(d)
 
     reader_options = dict(**writer_options, limits_storage=limits_storage)
     reader_options = {k: v for k, v in reader_options.items() if v is not None}
-    reader = bagz.Reader(file, bagz.Reader.Options(**reader_options))
+    reader = sackli.Reader(file, sackli.Reader.Options(**reader_options))
 
     all_indices = np.arange(len(records), dtype=np.int64)
 
@@ -216,7 +216,7 @@ class BagTest(parameterized.TestCase):
         reader.read_range_iter(25, 10)
 
     with self.subTest('bag_index'):
-      index = bagz.Index(reader)
+      index = sackli.Index(reader)
       num_empty = 5
       self.assertLen(index, len(records) - num_empty + 1)
       for i, record in enumerate(records):
@@ -228,7 +228,7 @@ class BagTest(parameterized.TestCase):
         _ = index['25']
 
     with self.subTest('multi_index'):
-      multi_index = bagz.MultiIndex(reader)
+      multi_index = sackli.MultiIndex(reader)
       # Empty records are (row + 2) % 4 == 0.
       expected_empty = [2, 6, 10, 14, 18]
       self.assertLen(multi_index, len(records) - len(expected_empty) + 1)
@@ -248,65 +248,65 @@ class BagTest(parameterized.TestCase):
     root = pathlib.Path('/posix:' + os.fspath(self.create_tempdir()))
     file = root / 'data.bagz'
     records = list(_generate_records(_NUM_RECORDS))
-    with bagz.Writer(file, bagz.Writer.Options()) as writer:
+    with sackli.Writer(file, sackli.Writer.Options()) as writer:
       for d in records:
         writer.write(d)
-    reader = bagz.Reader(file, bagz.Reader.Options())
+    reader = sackli.Reader(file, sackli.Reader.Options())
     self.assertEqual(list(reader), records)
 
   def test_file_not_found(self) -> None:
     with self.assertRaisesRegex(FileNotFoundError, 'not_a_file.bagz'):
-      bagz.Reader('not_a_file.bagz')
+      sackli.Reader('not_a_file.bagz')
 
   @parameterized.product(
       name=['data.bagz', 'data.bag'],
       limits_placement=(
           None,
-          bagz.LimitsPlacement.TAIL,
-          bagz.LimitsPlacement.SEPARATE,
+          sackli.LimitsPlacement.TAIL,
+          sackli.LimitsPlacement.SEPARATE,
       ),
       compression=(
           None,
-          bagz.CompressionAutoDetect(),
-          bagz.CompressionNone(),
-          bagz.CompressionZstd(level=3),
+          sackli.CompressionAutoDetect(),
+          sackli.CompressionNone(),
+          sackli.CompressionZstd(level=3),
       ),
   )
   def test_write_without_context_read(
       self,
       name: str,
-      limits_placement: bagz.LimitsPlacement | None,
+      limits_placement: sackli.LimitsPlacement | None,
       compression: Compression | None,
   ) -> None:
     file = pathlib.Path(self.create_tempdir()) / name
     records = list(_generate_records(_NUM_RECORDS))
     options = dict(limits_placement=limits_placement, compression=compression)
     options = {k: v for k, v in options.items() if v is not None}
-    writer = bagz.Writer(file, bagz.Writer.Options(**options))
+    writer = sackli.Writer(file, sackli.Writer.Options(**options))
     for d in records:
       writer.write(d)
     writer.flush()
     writer.close()
-    reader = bagz.Reader(file, bagz.Reader.Options(**options))
+    reader = sackli.Reader(file, sackli.Reader.Options(**options))
     self.assertEqual(list(reader), records)
 
   def test_read_all(self) -> None:
     file = pathlib.Path(self.create_tempdir()) / 'data.bagz'
     records = list(_generate_records(_NUM_RECORDS))
-    with bagz.Writer(file, bagz.Writer.Options()) as writer:
+    with sackli.Writer(file, sackli.Writer.Options()) as writer:
       for d in records:
         writer.write(d)
-    reader = bagz.Reader(file, bagz.Reader.Options())
+    reader = sackli.Reader(file, sackli.Reader.Options())
     self.assertEqual(reader.read(), records)
 
   def test_sequence_methods(self) -> None:
     file = pathlib.Path(self.create_tempdir()) / 'data.bagz'
     records = list(_generate_records(_NUM_RECORDS))
-    with bagz.Writer(file, bagz.Writer.Options()) as writer:
+    with sackli.Writer(file, sackli.Writer.Options()) as writer:
       for d in records:
         writer.write(d)
 
-    reader = bagz.Reader(file, bagz.Reader.Options())
+    reader = sackli.Reader(file, sackli.Reader.Options())
 
     with self.subTest('index'):
       self.assertEqual(reader.index(records[0]), 0)
@@ -333,23 +333,23 @@ class BagTest(parameterized.TestCase):
 
     with self.subTest('reversed'):
       reversed_reader = reversed(reader)
-      self.assertIsInstance(reversed_reader, bagz.Reader)
+      self.assertIsInstance(reversed_reader, sackli.Reader)
       self.assertSequenceEqual(reversed_reader, list(reader)[::-1])
 
   def test_slice_reader(self) -> None:
     file = pathlib.Path(self.create_tempdir()) / 'data.bagz'
     records = list(_generate_records(_NUM_RECORDS))
-    with bagz.Writer(file, bagz.Writer.Options()) as writer:
+    with sackli.Writer(file, sackli.Writer.Options()) as writer:
       for d in records:
         writer.write(d)
 
-    reader = bagz.Reader(file, bagz.Reader.Options())
+    reader = sackli.Reader(file, sackli.Reader.Options())
     self.assertIsInstance(reader, Sequence)
     all_values = reader.read_range(0, _NUM_RECORDS)
 
     for s in _all_slices(_NUM_RECORDS):
       reader_slice = reader[s]
-      self.assertIsInstance(reader_slice, bagz.Reader)
+      self.assertIsInstance(reader_slice, sackli.Reader)
       self.assertEqual(list(reader_slice), all_values[s], msg=f'slice: {s}')
       self.assertEqual(
           reader_slice.read_indices(range(len(reader_slice))),
@@ -371,12 +371,12 @@ class BagTest(parameterized.TestCase):
   def test_iterator(self) -> None:
     file = pathlib.Path(self.create_tempdir()) / 'data.bagz'
     records = list(_generate_records(_NUM_RECORDS))
-    with bagz.Writer(file) as writer:
+    with sackli.Writer(file) as writer:
       for d in records:
         writer.write(d)
     all_indices = np.arange(len(records))
     np.random.default_rng(42).shuffle(all_indices)
-    reader = bagz.Reader(file, bagz.Reader.Options())
+    reader = sackli.Reader(file, sackli.Reader.Options())
     for row, (index, record_index_iter, record_from_index) in enumerate(
         zip(
             all_indices,
@@ -393,10 +393,10 @@ class BagTest(parameterized.TestCase):
   def test_iterator_with_exception(self, read_ahead: int | None) -> None:
     file = pathlib.Path(self.create_tempdir()) / 'data.bagz'
     records = list(_generate_records(_NUM_RECORDS))
-    with bagz.Writer(file) as writer:
+    with sackli.Writer(file) as writer:
       for d in records:
         writer.write(d)
-    reader = bagz.Reader(file)
+    reader = sackli.Reader(file)
 
     class NotImplementedIterator(Iterable[int]):
 
@@ -478,7 +478,7 @@ class BagTest(parameterized.TestCase):
     file = pathlib.Path(self.create_tempdir()) / name
     records = _generate_stress_records(_STRESS_RECORDS)
     _write_records(file, records)
-    reader = bagz.Reader(file)
+    reader = sackli.Reader(file)
     num_workers = _thread_worker_count()
     barrier = threading.Barrier(num_workers)
 
@@ -499,9 +499,9 @@ class BagTest(parameterized.TestCase):
     file = pathlib.Path(self.create_tempdir()) / name
     records = _generate_stress_records(_STRESS_RECORDS)
     _write_records(file, records)
-    reader = bagz.Reader(
+    reader = sackli.Reader(
         file,
-        bagz.Reader.Options(limits_storage=bagz.LimitsStorage.IN_MEMORY),
+        sackli.Reader.Options(limits_storage=sackli.LimitsStorage.IN_MEMORY),
     )
     num_workers = _thread_worker_count()
     barrier = threading.Barrier(num_workers)
@@ -528,7 +528,7 @@ class BagTest(parameterized.TestCase):
     def worker(worker_id: int) -> None:
       rng = np.random.default_rng(2000 + worker_id)
       barrier.wait()
-      reader = bagz.Reader(file)
+      reader = sackli.Reader(file)
       for _ in range(_thread_iterations()):
         index = int(rng.integers(len(records)))
         self.assertEqual(reader[index], records[index])
@@ -540,8 +540,8 @@ class BagTest(parameterized.TestCase):
     file = pathlib.Path(self.create_tempdir()) / 'data.bagz'
     records = _generate_stress_records(_STRESS_RECORDS)
     _write_records(file, records)
-    reader = bagz.Reader(
-        file, bagz.Reader.Options(max_parallelism=max_parallelism)
+    reader = sackli.Reader(
+        file, sackli.Reader.Options(max_parallelism=max_parallelism)
     )
     num_workers = min(_thread_worker_count(), 8)
     barrier = threading.Barrier(num_workers)
@@ -567,7 +567,7 @@ class BagTest(parameterized.TestCase):
     file = pathlib.Path(self.create_tempdir()) / 'data.bagz'
     records = _generate_stress_records(_STRESS_RECORDS)
     _write_records(file, records)
-    reader = bagz.Reader(file)
+    reader = sackli.Reader(file)
     num_workers = _thread_worker_count()
     barrier = threading.Barrier(num_workers)
 

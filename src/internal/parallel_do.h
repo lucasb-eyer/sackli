@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef BAGZ_SRC_INTERNAL_PARALLEL_DO_H_
-#define BAGZ_SRC_INTERNAL_PARALLEL_DO_H_
+#ifndef SACKLI_SRC_INTERNAL_PARALLEL_DO_H_
+#define SACKLI_SRC_INTERNAL_PARALLEL_DO_H_
 
 #include <atomic>
 #include <cstddef>
@@ -24,7 +24,7 @@
 #include "absl/status/status.h"
 #include "absl/time/time.h"
 
-namespace bagz::internal {
+namespace sackli::internal {
 
 // Calls `func` with all task_ids in [0, `num_tasks`) concurrently.
 // Stops on first task failure seen. This may not be the smallest task_id
@@ -58,6 +58,6 @@ class ParallelOperation {
   virtual void Cancel() = 0;
 };
 
-}  // namespace bagz::internal
+}  // namespace sackli::internal
 
-#endif  // BAGZ_SRC_INTERNAL_PARALLEL_DO_H_
+#endif  // SACKLI_SRC_INTERNAL_PARALLEL_DO_H_

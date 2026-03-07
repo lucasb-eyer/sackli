@@ -40,7 +40,7 @@
 #include "src/file/file_system/shard_spec.h"
 #include "src/file/file_system/write_file.h"
 
-namespace bagz {
+namespace sackli {
 namespace {
 
 class MmapDeleter {
@@ -216,4 +216,4 @@ PosixFileSystem::BulkOpenPRead(absl::string_view filespec_without_prefix,
   return FileSystem::BulkOpenPRead(filespec, options);
 }
 
-}  // namespace bagz
+}  // namespace sackli

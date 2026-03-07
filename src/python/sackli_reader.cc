@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "src/bagz_reader.h"
+#include "src/sackli_reader.h"
 
 #include <Python.h>
 
@@ -34,8 +34,8 @@
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "absl/types/span.h"
-#include "src/bagz_iterator.h"
-#include "src/bagz_options.h"
+#include "src/sackli_iterator.h"
+#include "src/sackli_options.h"
 #include "pybind11/attr.h"
 #include "pybind11/cast.h"
 #include "pybind11/gil.h"
@@ -44,7 +44,7 @@
 #include "pybind11/pytypes.h"
 #include "pybind11/stl.h"
 
-namespace bagz {
+namespace sackli {
 namespace {
 
 namespace py = pybind11;
@@ -106,7 +106,7 @@ void ThrowNonOkStatusAsException(const absl::Status& status) {
 }
 
 constexpr char kOptionsDoc[] = R"(
-Options for creating the bagz.Reader.
+Options for creating the sackli.Reader.
 
 Args:
   sharding_layout: Specifies how input indexes/ranges are mapped to the
@@ -121,7 +121,7 @@ Args:
 )";
 
 constexpr char kInitDoc[] = R"(
-Opens a collection of Bagz-formatted files (shards).
+Opens a collection of Sackli-formatted files (shards).
 
 Args:
   file_spec: is either:
@@ -129,16 +129,16 @@ Args:
     * sharded file-spec (e.g. "fs:/path/to/foo@100.bagz").
     * comma-separated list of filenames and sharded file-specs
       (e.g. "fs:/path/to/f@3.bagz,fs:/path/to/bar.bagz").
-  options: options to use when reading, see `bagz.Reader.Options`.
+  options: options to use when reading, see `sackli.Reader.Options`.
 )";
 
-BagzReader Init(py::object file_spec_obj, const BagzReader::Options& options) {
+SackliReader Init(py::object file_spec_obj, const SackliReader::Options& options) {
   static absl::NoDestructor<py::object> fspath(
       py::module::import("os").attr("fspath"));
   std::string file_spec = py::cast<std::string>((*fspath)(file_spec_obj));
   {
     py::gil_scoped_release release_gil;
-    absl::StatusOr<BagzReader> reader = BagzReader::Open(file_spec, options);
+    absl::StatusOr<SackliReader> reader = SackliReader::Open(file_spec, options);
     ThrowNonOkStatusAsException(reader.status());
     return *std::move(reader);
   }
@@ -148,7 +148,7 @@ constexpr char kReadRangeDoc[] = R"(
 Returns all the records in the range [start, start + num_records).
 )";
 
-py::list ReadRange(const BagzReader& reader, size_t start, size_t num_records) {
+py::list ReadRange(const SackliReader& reader, size_t start, size_t num_records) {
   py::list result(num_records);
   {
     py::gil_scoped_release release;
@@ -162,7 +162,7 @@ constexpr char kReadIndicesDoc[] = R"(
 Returns the records at the given indices.
 )";
 
-py::list ReadIndicesFromSpan(const BagzReader& reader,
+py::list ReadIndicesFromSpan(const SackliReader& reader,
                              absl::Span<const size_t> indices) {
   py::list result(indices.size());
   {
@@ -174,7 +174,7 @@ py::list ReadIndicesFromSpan(const BagzReader& reader,
 }
 
 template <typename Int64>
-py::list ReadIndicesFromNumpy(const BagzReader& reader,
+py::list ReadIndicesFromNumpy(const SackliReader& reader,
                               py::array_t<Int64, py::array::c_style> indices) {
   static_assert(sizeof(Int64) == sizeof(size_t),
                 "Int64 must be the same size as size_t");
@@ -187,12 +187,12 @@ py::list ReadIndicesFromNumpy(const BagzReader& reader,
                           indices.shape()[0]));
 }
 
-py::list ReadIndicesFromIterable(const BagzReader& reader,
+py::list ReadIndicesFromIterable(const SackliReader& reader,
                                  std::vector<size_t> indices) {
   return ReadIndicesFromSpan(reader, indices);
 }
 
-py::list ReadIndicesFromSlice(const BagzReader& reader, py::slice slice) {
+py::list ReadIndicesFromSlice(const SackliReader& reader, py::slice slice) {
   ssize_t start, stop, step, slicelength;
   if (!slice.compute(static_cast<ssize_t>(reader.size()), &start, &stop, &step,
                      &slicelength)) {
@@ -213,7 +213,7 @@ constexpr char kGetItemDoc[] = R"(
 Returns the record at the given index.
 )";
 
-py::bytes GetItem(const BagzReader& reader, size_t index) {
+py::bytes GetItem(const SackliReader& reader, size_t index) {
   py::bytes result;
   {
     py::gil_scoped_release release;
@@ -229,7 +229,7 @@ py::bytes GetItem(const BagzReader& reader, size_t index) {
   return result;
 }
 
-BagzReader GetSlice(const BagzReader& reader, py::slice slice) {
+SackliReader GetSlice(const SackliReader& reader, py::slice slice) {
   ssize_t step, start, stop, slicelength;
   if (!slice.compute(static_cast<ssize_t>(reader.size()), &start, &stop, &step,
                      &slicelength)) {
@@ -245,9 +245,9 @@ BagzReader GetSlice(const BagzReader& reader, py::slice slice) {
 // Every second, the GIL is acquired to check for signals.
 // Returns whether any `callback` returned true.
 template <typename CallBack>
-bool AnyOf(BagzReader reader, CallBack&& callback) {
+bool AnyOf(SackliReader reader, CallBack&& callback) {
   py::gil_scoped_release release;
-  BagzIterator iterator(std::move(reader));
+  SackliIterator iterator(std::move(reader));
   absl::Time time_start = absl::Now();
   for (;;) {
     auto result = iterator.next();
@@ -275,7 +275,7 @@ Returns the index of the first occurrence of the given value in the reader.
 Raises a ValueError if the value is not found.
 )";
 
-size_t IndexOf(const BagzReader& reader, py::bytes value, size_t start,
+size_t IndexOf(const SackliReader& reader, py::bytes value, size_t start,
                std::optional<size_t> stop) {
   absl::string_view bytes = py::cast<absl::string_view>(value);
   size_t index = start;
@@ -290,7 +290,7 @@ size_t IndexOf(const BagzReader& reader, py::bytes value, size_t start,
                ++index;
                return false;
              })) {
-    throw py::value_error("value is not in the bagz.Reader");
+    throw py::value_error("value is not in the sackli.Reader");
   }
   return index;
 }
@@ -299,7 +299,7 @@ constexpr char kContainsDoc[] = R"(
 Returns whether the given value is in the reader.
 )";
 
-bool Contains(const BagzReader& reader, py::bytes value) {
+bool Contains(const SackliReader& reader, py::bytes value) {
   auto bytes = py::cast<absl::string_view>(value);
   return AnyOf(reader,
                [bytes](absl::string_view record) { return record == bytes; });
@@ -309,7 +309,7 @@ constexpr char kCountDoc[] = R"(
 Returns the number of occurrences of the given value in the reader.
 )";
 
-size_t Count(const BagzReader& reader, py::bytes value) {
+size_t Count(const SackliReader& reader, py::bytes value) {
   auto bytes = py::cast<absl::string_view>(value);
   size_t count = 0;
   AnyOf(reader, [bytes, &count](absl::string_view record) {
@@ -428,17 +428,17 @@ class PythonIterator {
   // Iterator that returns py::bytes. Ensures GIL is held when creating/copying
   // py::bytes objects.
   using IteratorPyBytes =
-      BagzIterator<MakeBytes, SpanFromBytes,
+      SackliIterator<MakeBytes, SpanFromBytes,
                    decltype([] { return py::gil_scoped_acquire(); })>;
 
   // Iterator that reads all records in the reader sequentially.
-  PythonIterator(BagzReader reader, std::optional<size_t> read_ahead)
+  PythonIterator(SackliReader reader, std::optional<size_t> read_ahead)
       : iterator_(
             std::make_unique<IteratorPyBytes>(std::move(reader), read_ahead)) {}
 
   // Iterator that reads records in the reader according to the sequence if
   // indices returned by index_iter.
-  PythonIterator(BagzReader reader, py::object index_iter,
+  PythonIterator(SackliReader reader, py::object index_iter,
                  std::optional<size_t> read_ahead)
       : exception_store_(std::make_unique<ExceptionStore>()),
         index_iter_(std::move(index_iter)),
@@ -491,22 +491,22 @@ class PythonIterator {
 
 }  // namespace
 
-void RegisterBagzReader(py::module& m) {
+void RegisterSackliReader(py::module& m) {
   auto register_sequence =
       py::module_::import("collections.abc").attr("Sequence").attr("register");
 
-  auto reader = py::class_<BagzReader>(
-      m, "Reader", "For reading a collection of Bagz-formatted shards.");
+  auto reader = py::class_<SackliReader>(
+      m, "Reader", "For reading a collection of Sackli-formatted shards.");
 
   auto reader_iterator = py::class_<PythonIterator>(
-      m, "ReaderIterator", "Iterator for a BagzReader.");
+      m, "ReaderIterator", "Iterator for a SackliReader.");
 
-  py::class_<BagzReader::Options>(reader, "Options", kOptionsDoc + 1)
+  py::class_<SackliReader::Options>(reader, "Options", kOptionsDoc + 1)
       .def(
           py::init([](ShardingLayout sharding_layout,
                       LimitsPlacement limits_placement, Compression compression,
                       LimitsStorage limits_storage, int max_parallelism) {
-            return BagzReader::Options{
+            return SackliReader::Options{
                 .sharding_layout = sharding_layout,
                 .limits_placement = limits_placement,
                 .compression = compression,
@@ -514,25 +514,25 @@ void RegisterBagzReader(py::module& m) {
                 .max_parallelism = max_parallelism,
             };
           }),
-          py::arg("sharding_layout") = BagzReader::Options{}.sharding_layout,
-          py::arg("limits_placement") = BagzReader::Options{}.limits_placement,
-          py::arg("compression") = BagzReader::Options{}.compression,
-          py::arg("limits_storage") = BagzReader::Options{}.limits_storage,
-          py::arg("max_parallelism") = BagzReader::Options{}.max_parallelism)
-      .def_readwrite("sharding_layout", &BagzReader::Options::sharding_layout)
-      .def_readwrite("limits_placement", &BagzReader::Options::limits_placement)
-      .def_readwrite("compression", &BagzReader::Options::compression)
-      .def_readwrite("limits_storage", &BagzReader::Options::limits_storage)
-      .def_readwrite("max_parallelism", &BagzReader::Options::max_parallelism);
+          py::arg("sharding_layout") = SackliReader::Options{}.sharding_layout,
+          py::arg("limits_placement") = SackliReader::Options{}.limits_placement,
+          py::arg("compression") = SackliReader::Options{}.compression,
+          py::arg("limits_storage") = SackliReader::Options{}.limits_storage,
+          py::arg("max_parallelism") = SackliReader::Options{}.max_parallelism)
+      .def_readwrite("sharding_layout", &SackliReader::Options::sharding_layout)
+      .def_readwrite("limits_placement", &SackliReader::Options::limits_placement)
+      .def_readwrite("compression", &SackliReader::Options::compression)
+      .def_readwrite("limits_storage", &SackliReader::Options::limits_storage)
+      .def_readwrite("max_parallelism", &SackliReader::Options::max_parallelism);
 
   reader
       .def(py::init(&Init), py::arg("file_spec"),
-           py::arg("options") = BagzReader::Options{}, py::doc(kInitDoc + 1))
-      .def("__len__", &BagzReader::size)
+           py::arg("options") = SackliReader::Options{}, py::doc(kInitDoc + 1))
+      .def("__len__", &SackliReader::size)
       .def("__getitem__", &GetItem, py::arg("index"), py::doc(kGetItemDoc + 1))
       .def("__getitem__", &GetSlice, py::arg("slice"), py::doc(kGetItemDoc + 1))
       .def("__reversed__",
-           [](const BagzReader& reader) {
+           [](const SackliReader& reader) {
              if (reader.size() == 0) {
                return reader;
              } else {
@@ -543,14 +543,14 @@ void RegisterBagzReader(py::module& m) {
              }
            })
       .def("approximate_bytes_per_record",
-           &BagzReader::ApproximateNumBytesPerRecord)
+           &SackliReader::ApproximateNumBytesPerRecord)
       .def("read",
-           [](const BagzReader& reader) {
+           [](const SackliReader& reader) {
              return ReadRange(reader, 0, reader.size());
            })
       .def(
           "read_range_iter",
-          [](const BagzReader& reader, std::size_t start,
+          [](const SackliReader& reader, std::size_t start,
              std::size_t num_records,
              std::optional<size_t> read_ahead = std::nullopt) {
             auto reader_slice = reader.Slice(start, 1, num_records);
@@ -561,7 +561,7 @@ void RegisterBagzReader(py::module& m) {
           py::arg("read_ahead") = std::nullopt)
       .def(
           "read_indices_iter",
-          [](const BagzReader& reader, py::object indices_iterable,
+          [](const SackliReader& reader, py::object indices_iterable,
              std::optional<size_t> read_ahead = std::nullopt) {
             PyObject* indices_iter = PyObject_GetIter(indices_iterable.ptr());
             if (PyErr_Occurred()) {
@@ -574,7 +574,7 @@ void RegisterBagzReader(py::module& m) {
           py::arg("indices"), py::kw_only(),
           py::arg("read_ahead") = std::nullopt)
       .def("__iter__",
-           [](const BagzReader& reader) {
+           [](const SackliReader& reader) {
              return PythonIterator(reader, std::nullopt);
            })
       .def("__contains__", &Contains, py::arg("value"),
@@ -600,4 +600,4 @@ void RegisterBagzReader(py::module& m) {
   register_sequence(reader);
 }
 
-}  // namespace bagz
+}  // namespace sackli

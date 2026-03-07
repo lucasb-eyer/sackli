@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "src/python/bagz_writer.h"
+#include "src/python/sackli_writer.h"
 
 #include <stdexcept>
 #include <string>
@@ -22,8 +22,8 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
-#include "src/bagz_options.h"
-#include "src/bagz_writer.h"
+#include "src/sackli_options.h"
+#include "src/sackli_writer.h"
 #include "pybind11/attr.h"
 #include "pybind11/cast.h"
 #include "pybind11/gil.h"
@@ -32,21 +32,21 @@
 #include "pybind11/pytypes.h"
 #include "pybind11/stl.h"
 
-namespace bagz {
+namespace sackli {
 
 namespace {
 
 namespace py = pybind11;
 
 const char kWriterInitDoc[] = R"(
-Open a single Bagz file shard for writing.
+Open a single Sackli file shard for writing.
 
 Use as a context manager to ensure the file is closed.
 
 Example:
 
 ```python
-with bagz.Writer(filename) as writer:
+with sackli.Writer(filename) as writer:
   for record in records:
     writer.write(record)
 ```
@@ -54,11 +54,11 @@ with bagz.Writer(filename) as writer:
 Args:
   filename: Filename to open for writing. During writing, a limits file will be
     created with the same name as the filename with the prefix "limits.".
-  options: See `bagz.Writer.Options`.
+  options: See `sackli.Writer.Options`.
 )";
 
 constexpr char kWriterWriteDoc[] = R"(
-Writes a record to the Bagz file.
+Writes a record to the Sackli file.
 
 Compresses according to the `compression` option. Writes may be buffered but can
 be flushed with `flush`.
@@ -68,16 +68,16 @@ Args:
 )";
 
 constexpr char kWriterFlushDoc[] = R"(
-Flushes the BagzWriter.
+Flushes the SackliWriter.
 
 Calls `Flush` on the 'records' and 'limits'. When completed, data written so far
-will be available to be read using `bagz.Reader`.
+will be available to be read using `sackli.Reader`.
 
 Throws an error either if the 'records' or 'limits' FileWriters fail to flush.
 )";
 
 constexpr char kWriterCloseDoc[] = R"(
-Closes the BagzWriter.
+Closes the SackliWriter.
 
 When created with `options.limits_placement`
 
@@ -86,12 +86,12 @@ When created with `options.limits_placement`
   and deleted. 'records' is closed.
 
 Throws an error if any of the file operations fail. The data that was
-successfully written will be recoverable using `bagz.Reader` regardless of
+successfully written will be recoverable using `sackli.Reader` regardless of
 the `limits` placement.
 )";
 
 constexpr char kWriterOptionsDoc[] = R"(
-Options for creating the bagz.Writer.
+Options for creating the sackli.Writer.
 
 Attributes:
   limits_placement: Placement of the limits section on close defaulting to
@@ -100,7 +100,7 @@ Attributes:
 )";
 
 constexpr char kWriterOptionsInitDoc[] = R"(
-Creates a `bagz.Writer.Options`.
+Creates a `sackli.Writer.Options`.
 
 Args:
   limits_placement: Placement of the limits section on close defaulting to TAIL.
@@ -109,47 +109,47 @@ Args:
 
 }  // namespace
 
-void RegisterBagzWriter(pybind11::module& m) {
+void RegisterSackliWriter(pybind11::module& m) {
   auto writer =
-      py::class_<BagzWriter>(m, "Writer", "Writes a single Bagz shard.");
+      py::class_<SackliWriter>(m, "Writer", "Writes a single Sackli shard.");
 
-  py::class_<BagzWriter::Options>(writer, "Options", kWriterOptionsDoc + 1)
+  py::class_<SackliWriter::Options>(writer, "Options", kWriterOptionsDoc + 1)
       .def(py::init(
                [](LimitsPlacement limits_placement, Compression compression) {
-                 return BagzWriter::Options{
+                 return SackliWriter::Options{
                      .limits_placement = limits_placement,
                      .compression = std::move(compression),
                  };
                }),
-           py::arg("limits_placement") = BagzWriter::Options{}.limits_placement,
-           py::arg("compression") = BagzWriter::Options{}.compression,
+           py::arg("limits_placement") = SackliWriter::Options{}.limits_placement,
+           py::arg("compression") = SackliWriter::Options{}.compression,
            py::doc(kWriterOptionsInitDoc + 1))
-      .def_readwrite("limits_placement", &BagzWriter::Options::limits_placement)
-      .def_readwrite("compression", &BagzWriter::Options::compression);
+      .def_readwrite("limits_placement", &SackliWriter::Options::limits_placement)
+      .def_readwrite("compression", &SackliWriter::Options::compression);
 
   writer
       .def(py::init(
-               [](py::object filename_obj, const BagzWriter::Options& options) {
+               [](py::object filename_obj, const SackliWriter::Options& options) {
                  static absl::NoDestructor<py::object> fspath(
                      py::module::import("os").attr("fspath"));
                  std::string filename =
                      py::cast<std::string>((*fspath)(filename_obj));
                  {
                    py::gil_scoped_release release_gil;
-                   absl::StatusOr<BagzWriter> writer =
-                       BagzWriter::OpenFile(filename, options);
+                   absl::StatusOr<SackliWriter> writer =
+                       SackliWriter::OpenFile(filename, options);
                    if (!writer.ok()) {
                      throw std::invalid_argument(writer.status().ToString());
                    }
                    return *std::move(writer);
                  }
                }),
-           py::arg("filename"), py::arg("options") = BagzWriter::Options(),
+           py::arg("filename"), py::arg("options") = SackliWriter::Options(),
            py::doc(kWriterInitDoc + 1))
-      .def("__enter__", [](BagzWriter& self) -> BagzWriter& { return self; })
+      .def("__enter__", [](SackliWriter& self) -> SackliWriter& { return self; })
       .def(
           "__exit__",
-          [](BagzWriter& self, py::handle exc_type, py::handle exc_value,
+          [](SackliWriter& self, py::handle exc_type, py::handle exc_value,
              py::handle traceback) {
             absl::Status status = self.Close();
             if (!status.ok()) {
@@ -160,7 +160,7 @@ void RegisterBagzWriter(pybind11::module& m) {
           py::call_guard<py::gil_scoped_release>())
       .def(
           "write",
-          [](BagzWriter* writer, absl::string_view record) {
+          [](SackliWriter* writer, absl::string_view record) {
             if (absl::Status status = writer->Write(record); !status.ok()) {
               throw std::invalid_argument(status.ToString());
             }
@@ -169,7 +169,7 @@ void RegisterBagzWriter(pybind11::module& m) {
           py::doc(kWriterWriteDoc + 1))
       .def(
           "close",
-          [](BagzWriter* writer) {
+          [](SackliWriter* writer) {
             if (absl::Status status = writer->Close(); !status.ok()) {
               throw std::invalid_argument(status.ToString());
             }
@@ -178,7 +178,7 @@ void RegisterBagzWriter(pybind11::module& m) {
           py::doc(kWriterCloseDoc + 1))
       .def(
           "flush",
-          [](BagzWriter* writer) {
+          [](SackliWriter* writer) {
             if (absl::Status status = writer->Flush(); !status.ok()) {
               throw std::invalid_argument(status.ToString());
             }
@@ -187,4 +187,4 @@ void RegisterBagzWriter(pybind11::module& m) {
           py::doc(kWriterFlushDoc + 1));
 }
 
-}  // namespace bagz
+}  // namespace sackli

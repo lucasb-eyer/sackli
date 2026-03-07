@@ -12,17 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef BAGZ_SRC_FILE_REGISTRY_REGISTER_FILE_SYSTEMS_H_
-#define BAGZ_SRC_FILE_REGISTRY_REGISTER_FILE_SYSTEMS_H_
+#ifndef SACKLI_SRC_FILE_REGISTRY_REGISTER_FILE_SYSTEMS_H_
+#define SACKLI_SRC_FILE_REGISTRY_REGISTER_FILE_SYSTEMS_H_
 
 #include "src/file/registry/file_system_registry.h"
 
-namespace bagz {
+namespace sackli {
 
 // Called once from `file_system/file.h` on first use to register all
 // file-systems.
 void RegisterFileSystems(FileSystemRegistry& registry);
 
-}  // namespace bagz
+}  // namespace sackli
 
-#endif  // BAGZ_SRC_FILE_REGISTRY_REGISTER_FILE_SYSTEMS_H_
+#endif  // SACKLI_SRC_FILE_REGISTRY_REGISTER_FILE_SYSTEMS_H_

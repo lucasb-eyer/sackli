@@ -17,34 +17,34 @@
 #include "src/file/file_systems/posix/posix_file_system.h"
 #include "src/file/registry/file_system_registry.h"
 
-#if BAGZ_ENABLE_GCS
+#if SACKLI_ENABLE_GCS
 #include "src/file/file_systems/gcs/gcs_file_system.h"
 #endif
 
-#if BAGZ_ENABLE_S3
+#if SACKLI_ENABLE_S3
 #include "src/file/file_systems/s3/s3_file_system.h"
 #endif
 
-namespace bagz {
+namespace sackli {
 
 void RegisterFileSystems(FileSystemRegistry& register_fs) {
   static absl::NoDestructor<PosixFileSystem> posix_fs;
 
-#if BAGZ_ENABLE_GCS
-  static absl::NoDestructor<bagz::GcsFileSystem> gcs_fs;
+#if SACKLI_ENABLE_GCS
+  static absl::NoDestructor<sackli::GcsFileSystem> gcs_fs;
 #endif
 
-#if BAGZ_ENABLE_S3
-  static absl::NoDestructor<bagz::S3FileSystem> s3_fs;
+#if SACKLI_ENABLE_S3
+  static absl::NoDestructor<sackli::S3FileSystem> s3_fs;
 #endif
 
-#if BAGZ_ENABLE_GCS
+#if SACKLI_ENABLE_GCS
   ABSL_CHECK_OK(register_fs.Register("gs:", *gcs_fs));
 #endif
 
   ABSL_CHECK_OK(register_fs.Register("posix:", *posix_fs));
 
-#if BAGZ_ENABLE_S3
+#if SACKLI_ENABLE_S3
   ABSL_CHECK_OK(register_fs.Register("s3:", *s3_fs));
 #endif
 
@@ -52,4 +52,4 @@ void RegisterFileSystems(FileSystemRegistry& register_fs) {
   ABSL_CHECK_OK(register_fs.Register("", *posix_fs));
 }
 
-}  // namespace bagz
+}  // namespace sackli

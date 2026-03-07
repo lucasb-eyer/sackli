@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef BAGZ_SRC_FILE_FILE_SYSTEM_STRING_PREAD_FILE_H_
-#define BAGZ_SRC_FILE_FILE_SYSTEM_STRING_PREAD_FILE_H_
+#ifndef SACKLI_SRC_FILE_FILE_SYSTEM_STRING_PREAD_FILE_H_
+#define SACKLI_SRC_FILE_FILE_SYSTEM_STRING_PREAD_FILE_H_
 
 #include <cstddef>
 #include <string>
@@ -24,7 +24,7 @@
 #include "absl/strings/string_view.h"
 #include "src/file/file_system/pread_file.h"
 
-namespace bagz {
+namespace sackli {
 
 // A PReadFile implementation that can be used for testing whether users of
 // PReadFile can handle patrial reads correctly.
@@ -49,6 +49,6 @@ class StringPReadFile : public PReadFile {
   size_t chunk_size_;
 };
 
-}  // namespace bagz
+}  // namespace sackli
 
-#endif  // BAGZ_SRC_FILE_FILE_SYSTEM_STRING_PREAD_FILE_H_
+#endif  // SACKLI_SRC_FILE_FILE_SYSTEM_STRING_PREAD_FILE_H_

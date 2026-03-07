@@ -19,7 +19,7 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 
-namespace bagz::internal {
+namespace sackli::internal {
 
 constexpr absl::string_view kLimitsSuffix = "limits.";
 
@@ -34,4 +34,4 @@ std::string LimitsName(absl::string_view filename) {
                       filename.substr(start_pos));
 }
 
-}  // namespace bagz::internal
+}  // namespace sackli::internal

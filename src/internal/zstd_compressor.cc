@@ -23,7 +23,7 @@
 #include "absl/strings/string_view.h"
 #include "zstd.h"
 
-namespace bagz::internal {
+namespace sackli::internal {
 
 constexpr size_t kCompressionBufferStartingSize = 1024ULL * 128ULL;  // 128 KiB.
 
@@ -56,4 +56,4 @@ absl::StatusOr<absl::string_view> ZstdCompressor::Compress(
   return absl::string_view(compression_buffer_.get(), compressed_size);
 }
 
-}  // namespace bagz::internal
+}  // namespace sackli::internal

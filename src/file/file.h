@@ -24,8 +24,8 @@
 // All file systems should be registered in `register_file_systems.cc` but it
 // is possible to register a file system dynamically.
 
-#ifndef BAGZ_SRC_FILE_FILE_H_
-#define BAGZ_SRC_FILE_FILE_H_
+#ifndef SACKLI_SRC_FILE_FILE_H_
+#define SACKLI_SRC_FILE_FILE_H_
 
 #include <cstdint>
 #include <memory>
@@ -38,7 +38,7 @@
 #include "src/file/file_system/pread_file.h"
 #include "src/file/file_system/write_file.h"
 
-namespace bagz::file {
+namespace sackli::file {
 
 // Opens a file for parallel reading.
 //
@@ -85,6 +85,6 @@ absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>>
 BulkOpenPRead(absl::string_view file_spec_with_prefix,
               absl::string_view options = {});
 
-}  // namespace bagz::file
+}  // namespace sackli::file
 
-#endif  // BAGZ_SRC_FILE_FILE_H_
+#endif  // SACKLI_SRC_FILE_FILE_H_

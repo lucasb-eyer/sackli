@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// An index from the Bagz value to its index in the Bagz file.
+// An index from the Sackli value to its index in the Sackli file.
 
-#ifndef BAGZ_SRC_BAGZ_MULTI_INDEX_H_
-#define BAGZ_SRC_BAGZ_MULTI_INDEX_H_
+#ifndef SACKLI_SRC_SACKLI_MULTI_INDEX_H_
+#define SACKLI_SRC_SACKLI_MULTI_INDEX_H_
 
 #include <cstddef>
 #include <optional>
@@ -27,16 +27,16 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
-#include "src/bagz_reader.h"
+#include "src/sackli_reader.h"
 
-namespace bagz {
+namespace sackli {
 
 // Creates a map from record to row-index.
-class BagzMultiIndex {
+class SackliMultiIndex {
  public:
   // Reads entire bag into an associative container. Compare `reader.size()`
   // with this->size()` to detect duplicate keys.
-  static absl::StatusOr<BagzMultiIndex> Create(const BagzReader& reader);
+  static absl::StatusOr<SackliMultiIndex> Create(const SackliReader& reader);
 
   // Returns row-indices associated with record.
   std::optional<absl::Span<const size_t>> operator[](
@@ -57,12 +57,12 @@ class BagzMultiIndex {
   size_t size() const { return index_.size(); }
 
  private:
-  BagzMultiIndex(
+  SackliMultiIndex(
       absl::flat_hash_map<std::string, absl::InlinedVector<size_t, 1>> index)
       : index_(std::move(index)) {}
   absl::flat_hash_map<std::string, absl::InlinedVector<size_t, 1>> index_;
 };
 
-}  // namespace bagz
+}  // namespace sackli
 
-#endif  // BAGZ_SRC_BAGZ_MULTI_INDEX_H_
+#endif  // SACKLI_SRC_SACKLI_MULTI_INDEX_H_

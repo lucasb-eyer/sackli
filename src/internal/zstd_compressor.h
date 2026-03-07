@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef BAGZ_SRC_INTERNAL_ZSTD_COMPRESSOR_H_
-#define BAGZ_SRC_INTERNAL_ZSTD_COMPRESSOR_H_
+#ifndef SACKLI_SRC_INTERNAL_ZSTD_COMPRESSOR_H_
+#define SACKLI_SRC_INTERNAL_ZSTD_COMPRESSOR_H_
 
 #include <cstddef>
 #include <memory>
@@ -22,7 +22,7 @@
 #include "absl/strings/string_view.h"
 #include "zstd.h"
 
-namespace bagz::internal {
+namespace sackli::internal {
 
 // C++ wrapper over ZStandard (ZSTD) compression functions.
 class ZstdCompressor {
@@ -51,6 +51,6 @@ class ZstdCompressor {
   std::unique_ptr<ZSTD_CDict, CDictDeleter> cdict_;
 };
 
-}  // namespace bagz::internal
+}  // namespace sackli::internal
 
-#endif  // BAGZ_SRC_INTERNAL_ZSTD_COMPRESSOR_H_
+#endif  // SACKLI_SRC_INTERNAL_ZSTD_COMPRESSOR_H_

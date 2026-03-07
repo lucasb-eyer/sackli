@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef BAGZ_SRC_BAGZ_ITERATOR_H_
-#define BAGZ_SRC_BAGZ_ITERATOR_H_
+#ifndef SACKLI_SRC_SACKLI_ITERATOR_H_
+#define SACKLI_SRC_SACKLI_ITERATOR_H_
 
 #include <algorithm>
 #include <atomic>
@@ -33,19 +33,19 @@
 #include "absl/synchronization/mutex.h"
 #include "absl/time/time.h"
 #include "absl/types/span.h"
-#include "src/bagz_reader.h"
+#include "src/sackli_reader.h"
 #include "src/internal/parallel_do.h"
 
-namespace bagz {
+namespace sackli {
 
 using SequenceReadBatch = absl::AnyInvocable<bool(
     size_t offset, size_t num_records, std::vector<size_t>&) const>;
 
-// Iterator for reading records from a BagzReader.
+// Iterator for reading records from a SackliReader.
 //
 // The iterator reads records in batches of size `read_ahead` if specified,
 // otherwise an estimate of the number of records based on read_ahead_bytes
-// setting in `bagz::Reader::Options`. The records are read in parallel.
+// setting in `sackli::Reader::Options`. The records are read in parallel.
 //
 // The iterator buffers the records in a vector in reverse order so they can be
 // moved out of the buffer efficiently.
@@ -56,13 +56,13 @@ using SequenceReadBatch = absl::AnyInvocable<bool(
 
 template <typename ResultMaker, typename SpanFromResult,
           typename BufferEditGuard>
-class BagzIterator {
+class SackliIterator {
  public:
   using Result = std::invoke_result_t<ResultMaker, size_t>;
 
   // If collection is not empty, it will be called with the offset and the
   // number of records to read and the indices of the records to read.
-  BagzIterator(BagzReader reader,
+  SackliIterator(SackliReader reader,
                std::optional<size_t> read_ahead = std::nullopt,
                SequenceReadBatch&& read_batch = {},
                ResultMaker&& make_result = {},
@@ -82,7 +82,7 @@ class BagzIterator {
         bytes_per_record = 8;
       }
       num_ahead = 1ull + (reader_.options().read_ahead_bytes.value_or(
-                              BagzReader::Options::kDefaultReadAheadBytes) /
+                              SackliReader::Options::kDefaultReadAheadBytes) /
                           bytes_per_record);
     }
     num_ahead = std::min(num_ahead, reader_.size());
@@ -120,9 +120,9 @@ class BagzIterator {
                 }
                 status = reader_.ReadIndicesWithAllocator(
                     indices,
-                    std::bind_front(&BagzIterator::AllocateForIndex, this,
+                    std::bind_front(&SackliIterator::AllocateForIndex, this,
                                     &buffer),
-                    std::bind_front(&BagzIterator::CopyResult, this, &buffer));
+                    std::bind_front(&SackliIterator::CopyResult, this, &buffer));
               }
             } else {
               size_t end_position =
@@ -135,7 +135,7 @@ class BagzIterator {
                 }
                 status = reader_.ReadRangeWithAllocator(
                     offset, batch_size,
-                    std::bind_front(&BagzIterator::AllocateForIndex, this,
+                    std::bind_front(&SackliIterator::AllocateForIndex, this,
                                     &buffer));
               }
             }
@@ -162,7 +162,7 @@ class BagzIterator {
         });
   }
 
-  ~BagzIterator() {
+  ~SackliIterator() {
     if (parallel_operation_ != nullptr) {
       parallel_operation_->Cancel();
       // Clear the result buffer to allow double buffer to be used.
@@ -226,7 +226,7 @@ class BagzIterator {
     (*buffer)[rev_to_index] = (*buffer)[rev_from_index];
   }
 
-  BagzReader reader_;
+  SackliReader reader_;
   size_t more_to_read_ = true;
   absl::Mutex buffer_mutex_;
   absl::CondVar next_available_;
@@ -262,13 +262,13 @@ struct NoOpEditGuard {
 template <typename ResultMaker = internal::StringMaker,
           typename SpanFromResult = internal::SpanFromString,
           typename BufferEditGuard = internal::NoOpEditGuard>
-BagzIterator(BagzReader reader, std::optional<size_t> read_ahead = std::nullopt,
+SackliIterator(SackliReader reader, std::optional<size_t> read_ahead = std::nullopt,
              SequenceReadBatch&& read_batch = {},
              ResultMaker&& make_result = {},
              SpanFromResult&& span_from_result = {},
              BufferEditGuard&& buffer_edit_guard = {})
-    -> BagzIterator<ResultMaker, SpanFromResult, BufferEditGuard>;
+    -> SackliIterator<ResultMaker, SpanFromResult, BufferEditGuard>;
 
-}  // namespace bagz
+}  // namespace sackli
 
-#endif  // BAGZ_SRC_BAGZ_ITERATOR_H_
+#endif  // SACKLI_SRC_SACKLI_ITERATOR_H_

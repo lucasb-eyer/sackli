@@ -30,6 +30,7 @@ jobs:
           CIBW_ENABLE: cpython-freethreading
           CIBW_BUILD: >-
             cp313-manylinux_x86_64
+            cp313t-manylinux_x86_64
             cp314-manylinux_x86_64
             cp314t-manylinux_x86_64
 

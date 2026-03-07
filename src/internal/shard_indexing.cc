@@ -20,7 +20,7 @@
 
 #include "absl/types/span.h"
 
-namespace bagz::internal {
+namespace sackli::internal {
 namespace {
 
 // Returns the number of items in the given shard.
@@ -205,4 +205,4 @@ std::vector<ShardRange> ShardIndexing::range(size_t global_index_start,
   }
 }
 
-}  // namespace bagz::internal
+}  // namespace sackli::internal

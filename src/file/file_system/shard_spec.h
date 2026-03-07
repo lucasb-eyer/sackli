@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef BAGZ_SRC_FILE_FILE_SYSTEM_SHARD_SPEC_H_
-#define BAGZ_SRC_FILE_FILE_SYSTEM_SHARD_SPEC_H_
+#ifndef SACKLI_SRC_FILE_FILE_SYSTEM_SHARD_SPEC_H_
+#define SACKLI_SRC_FILE_FILE_SYSTEM_SHARD_SPEC_H_
 
 #include <optional>
 #include <string>
@@ -22,7 +22,7 @@
 #include "absl/functional/function_ref.h"
 #include "absl/strings/string_view.h"
 
-namespace bagz {
+namespace sackli {
 
 // Splits shard-spec into individual shard names.
 //
@@ -82,6 +82,6 @@ std::string CanonicaliseShardSpec(
     absl::string_view shard_spec,
     absl::FunctionRef<std::string(const std::string&)> glob);
 
-}  // namespace bagz
+}  // namespace sackli
 
-#endif  // BAGZ_SRC_FILE_FILE_SYSTEM_SHARD_SPEC_H_
+#endif  // SACKLI_SRC_FILE_FILE_SYSTEM_SHARD_SPEC_H_

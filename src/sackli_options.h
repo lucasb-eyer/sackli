@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef BAGZ_SRC_BAGZ_OPTIONS_H_
-#define BAGZ_SRC_BAGZ_OPTIONS_H_
+#ifndef SACKLI_SRC_SACKLI_OPTIONS_H_
+#define SACKLI_SRC_SACKLI_OPTIONS_H_
 
 #include <cstddef>
 #include <string>
 #include <variant>
 
-namespace bagz {
+namespace sackli {
 
 // Whether limits are at the end of the file or in a separate file. See
 // README.md#limits.
@@ -70,6 +70,6 @@ class ExistingFileMode {
   bool opening_limits_placement_tail = false;
 };
 
-}  // namespace bagz
+}  // namespace sackli
 
-#endif  // BAGZ_SRC_BAGZ_OPTIONS_H_
+#endif  // SACKLI_SRC_SACKLI_OPTIONS_H_

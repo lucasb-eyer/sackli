@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef BAGZ_SRC_INTERNAL_BAGZ_SHARD_READER_H_
-#define BAGZ_SRC_INTERNAL_BAGZ_SHARD_READER_H_
+#ifndef SACKLI_SRC_INTERNAL_SACKLI_SHARD_READER_H_
+#define SACKLI_SRC_INTERNAL_SACKLI_SHARD_READER_H_
 
 #include <cstddef>
 #include <cstdint>
@@ -28,17 +28,17 @@
 #include "absl/types/span.h"
 #include "src/file/file_system/pread_file.h"
 
-namespace bagz::internal {
+namespace sackli::internal {
 
-// BagzShardReader interprets bytes with the Bagz-format.
-// See README.md#bagz-format for details.
+// SackliShardReader interprets bytes with the Sackli-format.
+// See README.md#sackli-format for details.
 //
-// A BagzShardReader is either in an engaged or in an empty state. The empty
+// A SackliShardReader is either in an engaged or in an empty state. The empty
 // state is only meant to support default construction and move-assignment,
 // and it is a precondition of all non-special member functions that the
 // instance be in an engaged state.
 //
-class BagzShardReader {
+class SackliShardReader {
  public:
   // Byte range in records file.
   struct ByteRange {
@@ -48,16 +48,16 @@ class BagzShardReader {
 
   // Constructs a reader with `records` and `limits` sections in distinct files,
   // resulting in an engaged state.
-  BagzShardReader(absl_nonnull std::unique_ptr<PReadFile> records,
+  SackliShardReader(absl_nonnull std::unique_ptr<PReadFile> records,
                   absl_nonnull std::unique_ptr<PReadFile> limits)
       : records_(std::move(records)), limits_(std::move(limits)) {}
 
   // Creates a reader in an empty state.
-  BagzShardReader();
+  SackliShardReader();
 
   // Move only. The moved-from object is in an empty state.
-  BagzShardReader(BagzShardReader&&) noexcept = default;
-  BagzShardReader& operator=(BagzShardReader&&) noexcept = default;
+  SackliShardReader(SackliShardReader&&) noexcept = default;
+  SackliShardReader& operator=(SackliShardReader&&) noexcept = default;
 
   // Returns the number of records in the shard.
   //
@@ -142,7 +142,7 @@ class BagzShardReader {
   //   callback(2, records[30, 40))
   //
   // The `callback` is invoked sequentially and in order in the same thread.
-  // See README.md#bagz-format for details.
+  // See README.md#sackli-format for details.
   //
   // Recall that `*this` must not be in the empty state.
   absl::Status ReadFromLimits(
@@ -156,6 +156,6 @@ class BagzShardReader {
   std::unique_ptr<PReadFile> limits_;
 };
 
-}  // namespace bagz::internal
+}  // namespace sackli::internal
 
-#endif  // BAGZ_SRC_INTERNAL_BAGZ_SHARD_READER_H_
+#endif  // SACKLI_SRC_INTERNAL_SACKLI_SHARD_READER_H_

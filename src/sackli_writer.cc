@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "src/bagz_writer.h"
+#include "src/sackli_writer.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -28,7 +28,7 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
-#include "src/bagz_options.h"
+#include "src/sackli_options.h"
 #include "src/file/file.h"
 #include "src/file/file_system/pread_file.h"
 #include "src/file/file_system/write_file.h"
@@ -37,7 +37,7 @@
 #include "src/internal/zstd_compressor.h"
 #include "zstd.h"
 
-namespace bagz {
+namespace sackli {
 
 namespace {
 
@@ -64,11 +64,11 @@ absl::Status AppendSourceToDest(PReadFile& src, WriteFile& dst) {
 
 }  // namespace
 
-class BagzWriter::State {
+class SackliWriter::State {
  public:
   // records_file file must be opened with "wb";
   // limits_file file must be opened with "w+b" if LimitsPlacement::kTail;
-  State(BagzWriter::Options options, std::unique_ptr<WriteFile> records_file,
+  State(SackliWriter::Options options, std::unique_ptr<WriteFile> records_file,
         std::unique_ptr<WriteFile> limits_file, std::string limits_filename)
       : records_file_(std::move(records_file)),
         limits_file_(std::move(limits_file)),
@@ -141,12 +141,12 @@ class BagzWriter::State {
   std::unique_ptr<WriteFile> limits_file_;
   std::optional<internal::ZstdCompressor> compressor_;
   std::string limits_filename_;
-  BagzWriter::Options options_;
+  SackliWriter::Options options_;
   uint64_t records_size_ = 0;
 };
 
-absl::StatusOr<BagzWriter> BagzWriter::OpenFile(absl::string_view filename,
-                                                BagzWriter::Options options) {
+absl::StatusOr<SackliWriter> SackliWriter::OpenFile(absl::string_view filename,
+                                                SackliWriter::Options options) {
   if (std::holds_alternative<CompressionAutoDetect>(options.compression)) {
     if (filename.ends_with(".bagz")) {
       options.compression.emplace<CompressionZstd>();
@@ -164,26 +164,26 @@ absl::StatusOr<BagzWriter> BagzWriter::OpenFile(absl::string_view filename,
     return limits_file.status();
   }
 
-  return BagzWriter(std::make_unique<State>(
+  return SackliWriter(std::make_unique<State>(
       std::move(options), *std::move(records_file), *std::move(limits_file),
       std::move(limits_filename)));
 }
 
-absl::Status BagzWriter::Write(absl::string_view record) {
+absl::Status SackliWriter::Write(absl::string_view record) {
   if (state_ == nullptr) {
     return absl::FailedPreconditionError("Closed");
   }
   return state_->Write(record);
 }
 
-absl::Status BagzWriter::Flush() {
+absl::Status SackliWriter::Flush() {
   if (state_ == nullptr) {
     return absl::FailedPreconditionError("Closed");
   }
   return state_->Flush();
 }
 
-absl::Status BagzWriter::Close() {
+absl::Status SackliWriter::Close() {
   if (state_ == nullptr) {
     return absl::OkStatus();
   }
@@ -192,11 +192,11 @@ absl::Status BagzWriter::Close() {
   return result;
 }
 
-BagzWriter::~BagzWriter() = default;
+SackliWriter::~SackliWriter() = default;
 
-BagzWriter::BagzWriter(BagzWriter&&) = default;
+SackliWriter::SackliWriter(SackliWriter&&) = default;
 
-BagzWriter::BagzWriter(std::unique_ptr<State> state)
+SackliWriter::SackliWriter(std::unique_ptr<State> state)
     : state_(std::move(state)) {}
 
-}  // namespace bagz
+}  // namespace sackli

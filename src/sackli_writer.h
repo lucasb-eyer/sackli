@@ -12,36 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Reference implementation of Bagz writer for POSIX systems.
+// Reference implementation of Sackli writer for POSIX systems.
 
-#ifndef BAGZ_SRC_BAGZ_WRITER_H_
-#define BAGZ_SRC_BAGZ_WRITER_H_
+#ifndef SACKLI_SRC_SACKLI_WRITER_H_
+#define SACKLI_SRC_SACKLI_WRITER_H_
 
 #include <memory>
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
-#include "src/bagz_options.h"
+#include "src/sackli_options.h"
 
-namespace bagz {
+namespace sackli {
 
-// Writes a single Bagz shard. When open there are two FileWriters present, one
+// Writes a single Sackli shard. When open there are two FileWriters present, one
 // called 'records' and the other called 'limits'. The 'records' file stores the
 // (possibly compressed) records, and the 'limits' file stores the byte-offsets
 // one-past-the-end of each record in 'records'.
 //
 // See README.md for more information.
-class BagzWriter {
+class SackliWriter {
  public:
   // Move-only.
-  BagzWriter(BagzWriter&&);
-  ~BagzWriter();
+  SackliWriter(SackliWriter&&);
+  ~SackliWriter();
 
   struct Options {
     // Where 'limits' data is placed on completion. While writing, 'limits' is
     // always written to a separate file.
-    // If the limits_placement is `kTail` when the BagzWriter is closed, the
+    // If the limits_placement is `kTail` when the SackliWriter is closed, the
     // 'limits' are written to the end of 'records' and the `limits` file is
     // deleted, otherwise the 'limits' file is closed.
     LimitsPlacement limits_placement = LimitsPlacement::kTail;
@@ -59,7 +59,7 @@ class BagzWriter {
   //
   // If a file exists, it is truncated to zero length. If either file cannot be
   // opened/created, an error is returned.
-  static absl::StatusOr<BagzWriter> OpenFile(absl::string_view filename,
+  static absl::StatusOr<SackliWriter> OpenFile(absl::string_view filename,
                                              Options options);
 
   // Writes a single record into 'records'. Compresses according to the
@@ -68,13 +68,13 @@ class BagzWriter {
   absl::Status Write(absl::string_view record);
 
   // Calls `Flush` on the 'records' and 'limits' FileWriters. When completed
-  // the data written so far will be available to be read using `BagzReader`.
+  // the data written so far will be available to be read using `SackliReader`.
   //
   // Returns an error either if the 'records' or 'limits' FileWriters fail to
   // flush.
   absl::Status Flush();
 
-  // Closes the BagzWriter
+  // Closes the SackliWriter
   //
   // When created with `options.limits_placement`
   //
@@ -84,16 +84,16 @@ class BagzWriter {
   //   'records' is closed.
   //
   // Returns an error if any of the file operations fail. The data that was
-  // successfully written will be recoverable using `BagzReader` regardless of
+  // successfully written will be recoverable using `SackliReader` regardless of
   // the `limits` placement.
   absl::Status Close();
 
  private:
   struct State;
-  BagzWriter(std::unique_ptr<State> state);
+  SackliWriter(std::unique_ptr<State> state);
   std::unique_ptr<State> state_;
 };
 
-}  // namespace bagz
+}  // namespace sackli
 
-#endif  // BAGZ_SRC_BAGZ_WRITER_H_
+#endif  // SACKLI_SRC_SACKLI_WRITER_H_

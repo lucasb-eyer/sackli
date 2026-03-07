@@ -22,7 +22,7 @@
 #include "absl/strings/string_view.h"
 #include "absl/utility/utility.h"
 
-namespace bagz {
+namespace sackli {
 
 absl::StatusOr<std::string> PReadFile::PReadToString(size_t offset,
                                                      size_t num_bytes) const {
@@ -39,4 +39,4 @@ absl::StatusOr<std::string> PReadFile::PReadToString(size_t offset,
   return result;
 }
 
-}  // namespace bagz
+}  // namespace sackli

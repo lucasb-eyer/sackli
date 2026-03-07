@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// An index from the Bagz value to its index in the Bagz file.
+// An index from the Sackli value to its index in the Sackli file.
 
-#include "src/bagz_index.h"
+#include "src/python/sackli_multi_index.h"
 
 #include <cstddef>
 #include <optional>
@@ -24,13 +24,15 @@
 
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
-#include "src/bagz_reader.h"
+#include "absl/types/span.h"
+#include "src/sackli_multi_index.h"
+#include "src/sackli_reader.h"
 #include "pybind11/cast.h"
 #include "pybind11/gil.h"
 #include "pybind11/pybind11.h"
 #include "pybind11/stl.h"
 
-namespace bagz {
+namespace sackli {
 namespace {
 
 namespace py = pybind11;
@@ -43,14 +45,14 @@ Args:
 )";
 
 constexpr char kGetDoc[] = R"(
-Returns first row-index of `record` or None if `record` is not found.
+Returns all row-indices of `record` or None if `record` is not found.
 
 Args:
   record: the record to get the index of.
 )";
 
 constexpr char kGetItemDoc[] = R"(
-Returns first row-index of `record`.
+Returns all row-indices of `record`.
 
 Args:
   record: the record to get the index of.
@@ -74,12 +76,13 @@ Compare with len(bag) to detect duplicates.
 
 }  // namespace
 
-void RegisterBagzIndex(py::module& m) {
-  py::class_<BagzIndex>(
-      m, "Index",
-      "An in-memory class for finding row-index of record in Bag file.")
-      .def(py::init([](const BagzReader& reader) {
-             if (absl::StatusOr<BagzIndex> index = BagzIndex::Create(reader);
+void RegisterSackliMultiIndex(py::module& m) {
+  py::class_<SackliMultiIndex>(
+      m, "MultiIndex",
+      "An in-memory class for finding row-indices of record in Bag file.")
+      .def(py::init([](const SackliReader& reader) {
+             if (absl::StatusOr<SackliMultiIndex> index =
+                     SackliMultiIndex::Create(reader);
                  index.ok()) {
                return *std::move(index);
              } else {
@@ -88,21 +91,49 @@ void RegisterBagzIndex(py::module& m) {
            }),
            py::arg("reader"), py::doc(kInitDoc + 1),
            py::call_guard<py::gil_scoped_release>())
-      .def("get", &BagzIndex::operator[], py::arg("record"),
-           py::doc(kGetDoc + 1))
+      .def(
+          "get",
+          [](const SackliMultiIndex& index, absl::string_view item,
+             py::object def) -> py::object {
+            std::optional<absl::Span<const size_t>> result;
+            {
+              py::gil_scoped_release release;
+              result = index[item];
+            }
+            if (result.has_value()) {
+              py::list l(result->size());
+              for (size_t i = 0; i < result->size(); ++i) {
+                l[i] = (*result)[i];
+              }
+              return l;
+            } else {
+              return def;
+            }
+          },
+          py::arg("item"), py::arg("default") = py::none(),
+          py::doc(kGetDoc + 1))
       .def(
           "__getitem__",
-          [](const BagzIndex& index, absl::string_view item) {
-            if (std::optional<size_t> i = index[item]; i.has_value()) {
-              return *i;
+          [](const SackliMultiIndex& index, absl::string_view item) {
+            std::optional<absl::Span<const size_t>> result;
+            {
+              py::gil_scoped_release release;
+              result = index[item];
+            }
+            if (result.has_value()) {
+              py::list l(result->size());
+              for (size_t i = 0; i < result->size(); ++i) {
+                l[i] = (*result)[i];
+              }
+              return l;
             } else {
               throw py::key_error(std::string(item));
             }
           },
           py::doc(kGetItemDoc + 1))
-      .def("__contains__", &BagzIndex::Contains, py::arg("record"),
+      .def("__contains__", &SackliMultiIndex::Contains, py::arg("record"),
            py::doc(kContainsDoc + 1))
-      .def("__len__", &BagzIndex::size, py::doc(kLenDoc + 1));
+      .def("__len__", &SackliMultiIndex::size, py::doc(kLenDoc + 1));
 }
 
-}  // namespace bagz
+}  // namespace sackli

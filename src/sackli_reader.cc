@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "src/bagz_reader.h"
+#include "src/sackli_reader.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -34,10 +34,10 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
-#include "src/bagz_options.h"
+#include "src/sackli_options.h"
 #include "src/file/file.h"
 #include "src/file/file_system/pread_file.h"
-#include "src/internal/bagz_shard_reader.h"
+#include "src/internal/sackli_shard_reader.h"
 #include "src/internal/limits_name.h"
 #include "src/internal/parallel_do.h"
 #include "src/internal/records_limits.h"
@@ -46,7 +46,7 @@
 #include "src/internal/zstd_decompressor.h"
 #include "zstd.h"
 
-namespace bagz {
+namespace sackli {
 namespace {
 
 // Reads the entire file into memory on first use the provided PReadFile
@@ -96,9 +96,9 @@ class InMemoryPReadFile : public PReadFile {
 
 }  // namespace
 
-struct BagzReader::State {
-  State(BagzReader::Options options,
-        std::vector<internal::BagzShardReader> shards,
+struct SackliReader::State {
+  State(SackliReader::Options options,
+        std::vector<internal::SackliShardReader> shards,
         std::vector<size_t> accumulated_count)
       : options_(std::move(options)),
         shards_(std::move(shards)),
@@ -138,20 +138,20 @@ struct BagzReader::State {
     return status;
   }
 
-  absl::StatusOr<BagzReader::Handle> ReadHandle(size_t index) const {
+  absl::StatusOr<SackliReader::Handle> ReadHandle(size_t index) const {
     internal::ShardIndex shard_index = shard_indexing_.index(index);
-    absl::StatusOr<internal::BagzShardReader::ByteRange> byte_range =
+    absl::StatusOr<internal::SackliShardReader::ByteRange> byte_range =
         shards_[shard_index.shard].ReadByteRange(shard_index.shard_index);
     if (!byte_range.ok()) {
       return byte_range.status();
     }
-    return BagzReader::Handle{.shard = shard_index.shard,
+    return SackliReader::Handle{.shard = shard_index.shard,
                               .offset = byte_range->offset,
                               .num_bytes = byte_range->length};
   }
 
   absl::Status ReadFromHandleWithAllocator(
-      BagzReader::Handle handle,
+      SackliReader::Handle handle,
       absl::FunctionRef<absl::Span<char>(size_t record_size)> allocate) const {
     auto decompressor = decompressor_factory_ != nullptr
                             ? decompressor_pool_.Get(decompressor_factory_)
@@ -159,7 +159,7 @@ struct BagzReader::State {
     absl::Status compress_status = absl::OkStatus();
 
     absl::Status status = shards_[handle.shard].ReadFromByteRange(
-        internal::BagzShardReader::ByteRange{.offset = handle.offset,
+        internal::SackliShardReader::ByteRange{.offset = handle.offset,
                                              .length = handle.num_bytes},
         [&](absl::string_view compressed) {
           compress_status =
@@ -284,13 +284,13 @@ struct BagzReader::State {
       return 0.0;
     }
     size_t num_bytes = 0;
-    for (const internal::BagzShardReader& shard : shards_) {
+    for (const internal::SackliShardReader& shard : shards_) {
       num_bytes += shard.num_bytes();
     }
     return static_cast<double>(num_bytes) / num_records;
   }
 
-  const BagzReader::Options& options() const { return options_; }
+  const SackliReader::Options& options() const { return options_; }
 
  private:
   static absl::Status DecompressInto(
@@ -343,25 +343,25 @@ struct BagzReader::State {
   }
 
   Options options_;
-  std::vector<internal::BagzShardReader> shards_;
+  std::vector<internal::SackliShardReader> shards_;
   internal::ShardIndexing shard_indexing_;
   mutable internal::RecyclingPool<internal::ZstdDecompressor>
       decompressor_pool_;
   absl::AnyInvocable<internal::ZstdDecompressor() const> decompressor_factory_;
 };
 
-size_t BagzReader::size() const { return slice_length_; }
+size_t SackliReader::size() const { return slice_length_; }
 
-double BagzReader::ApproximateNumBytesPerRecord() const {
+double SackliReader::ApproximateNumBytesPerRecord() const {
   return state_->ApproximateNumBytesPerRecord();
 }
 
-absl::StatusOr<std::string> BagzReader::operator[](size_t index) const {
+absl::StatusOr<std::string> SackliReader::operator[](size_t index) const {
   if (index >= slice_length_) {
     return absl::OutOfRangeError(absl::StrCat(
         "index ", index, " out of range [0, ", slice_length_, ")"));
   }
-  absl::StatusOr<BagzReader::Handle> handle =
+  absl::StatusOr<SackliReader::Handle> handle =
       state_->ReadHandle(index * slice_step_ + slice_start_);
   if (!handle.ok()) {
     return handle.status();
@@ -369,7 +369,7 @@ absl::StatusOr<std::string> BagzReader::operator[](size_t index) const {
   return ReadFromHandle(*handle);
 }
 
-absl::StatusOr<std::vector<std::string>> BagzReader::ReadRange(
+absl::StatusOr<std::vector<std::string>> SackliReader::ReadRange(
     size_t start, size_t num_records) const {
   if (start + num_records > slice_length_) {
     return absl::OutOfRangeError(
@@ -411,7 +411,7 @@ absl::StatusOr<std::vector<std::string>> BagzReader::ReadRange(
   }
 }
 
-absl::StatusOr<std::vector<std::string>> BagzReader::ReadIndices(
+absl::StatusOr<std::vector<std::string>> SackliReader::ReadIndices(
     absl::Span<const size_t> indices) const {
   std::vector<std::size_t> indices_vector;
   if (slice_step_ != 1 || slice_start_ != 0) {
@@ -446,7 +446,7 @@ absl::StatusOr<std::vector<std::string>> BagzReader::ReadIndices(
   }
 }
 
-absl::Status BagzReader::ReadWithAllocator(
+absl::Status SackliReader::ReadWithAllocator(
     size_t index,
     absl::FunctionRef<absl::Span<char>(size_t record_size)> allocate) const {
   if (index >= slice_length_) {
@@ -457,7 +457,7 @@ absl::Status BagzReader::ReadWithAllocator(
                                    allocate);
 }
 
-absl::Status BagzReader::ReadRangeWithAllocator(
+absl::Status SackliReader::ReadRangeWithAllocator(
     size_t start, size_t num_records,
     absl::FunctionRef<absl::Span<char>(size_t result_index, size_t record_size)>
         allocate_for_index) const {
@@ -484,7 +484,7 @@ absl::Status BagzReader::ReadRangeWithAllocator(
                                         allocate_for_index);
 }
 
-absl::Status BagzReader::ReadIndicesWithAllocator(
+absl::Status SackliReader::ReadIndicesWithAllocator(
     absl::Span<const size_t> indices,
     absl::FunctionRef<absl::Span<char>(size_t result_index, size_t record_size)>
         allocate_for_index,
@@ -509,14 +509,14 @@ absl::Status BagzReader::ReadIndicesWithAllocator(
                                           copy_result);
 }
 
-absl::StatusOr<BagzReader> BagzReader::OpenFiles(
+absl::StatusOr<SackliReader> SackliReader::OpenFiles(
     absl::Span<absl_nonnull std::unique_ptr<PReadFile>> record_files,
     absl::Span<absl_nonnull std::unique_ptr<PReadFile>> limits_files,
     Options options) {
   if (std::holds_alternative<CompressionAutoDetect>(options.compression)) {
     return absl::InvalidArgumentError(
         "Compression must not be kAutoDetect when calling "
-        "BagzReader::OpenFiles().");
+        "SackliReader::OpenFiles().");
   }
 
   std::vector<std::unique_ptr<PReadFile>> limit_files_vector;
@@ -557,7 +557,7 @@ absl::StatusOr<BagzReader> BagzReader::OpenFiles(
       return status;
     }
   }
-  std::vector<internal::BagzShardReader> shards;
+  std::vector<internal::SackliShardReader> shards;
   size_t total_count = 0;
   std::vector<size_t> accumulated_count;
   for (size_t i = 0; i < record_files.size(); ++i) {
@@ -566,7 +566,7 @@ absl::StatusOr<BagzReader> BagzReader::OpenFiles(
           std::make_unique<InMemoryPReadFile>(std::move(limits_files[i]));
     }
 
-    internal::BagzShardReader& shard = shards.emplace_back(
+    internal::SackliShardReader& shard = shards.emplace_back(
         std::move(record_files[i]), std::move(limits_files[i]));
     total_count += shard.size();
     accumulated_count.push_back(total_count);
@@ -587,14 +587,14 @@ absl::StatusOr<BagzReader> BagzReader::OpenFiles(
       }
     }
   }
-  return BagzReader(
+  return SackliReader(
       std::make_shared<State>(std::move(options), std::move(shards),
                               std::move(accumulated_count)),
       /*slice_start=*/0, /*slice_step=*/1, /*slice_length=*/total_count);
 }
 
-absl::StatusOr<BagzReader> BagzReader::Open(absl::string_view filespec,
-                                            BagzReader::Options options) {
+absl::StatusOr<SackliReader> SackliReader::Open(absl::string_view filespec,
+                                            SackliReader::Options options) {
   if (std::holds_alternative<CompressionAutoDetect>(options.compression)) {
     if (filespec.ends_with(".bagz")) {
       options.compression.emplace<CompressionZstd>();
@@ -625,7 +625,7 @@ absl::StatusOr<BagzReader> BagzReader::Open(absl::string_view filespec,
   return OpenFiles(record_files, limits_files, std::move(options));
 }
 
-absl::StatusOr<BagzReader::Handle> BagzReader::ReadHandle(size_t index) const {
+absl::StatusOr<SackliReader::Handle> SackliReader::ReadHandle(size_t index) const {
   if (index >= slice_length_) {
     return absl::OutOfRangeError(absl::StrCat(
         "index ", index, " out of range [0, ", slice_length_, ")"));
@@ -633,7 +633,7 @@ absl::StatusOr<BagzReader::Handle> BagzReader::ReadHandle(size_t index) const {
   return state_->ReadHandle(index * slice_step_ + slice_start_);
 }
 
-absl::StatusOr<std::string> BagzReader::ReadFromHandle(Handle handle) const {
+absl::StatusOr<std::string> SackliReader::ReadFromHandle(Handle handle) const {
   std::string result;
   if (absl::Status status =
           state_->ReadFromHandleWithAllocator(handle,
@@ -648,13 +648,13 @@ absl::StatusOr<std::string> BagzReader::ReadFromHandle(Handle handle) const {
   }
 }
 
-absl::Status BagzReader::ReadFromHandleWithAllocator(
+absl::Status SackliReader::ReadFromHandleWithAllocator(
     Handle handle,
     absl::FunctionRef<absl::Span<char>(size_t record_size)> allocate) const {
   return state_->ReadFromHandleWithAllocator(handle, allocate);
 }
 
-absl::StatusOr<BagzReader> BagzReader::Slice(size_t start, int64_t step,
+absl::StatusOr<SackliReader> SackliReader::Slice(size_t start, int64_t step,
                                              size_t length) const {
   size_t num_records = size();
   if (step == 0) {
@@ -682,11 +682,11 @@ absl::StatusOr<BagzReader> BagzReader::Slice(size_t start, int64_t step,
   }
   start = slice_start_ + start * slice_step_;
   step *= slice_step_;
-  return BagzReader(state_, length != 0 ? start : 0, step, length);
+  return SackliReader(state_, length != 0 ? start : 0, step, length);
 }
 
-const BagzReader::Options& BagzReader::options() const {
+const SackliReader::Options& SackliReader::options() const {
   return state_->options();
 }
 
-}  // namespace bagz
+}  // namespace sackli

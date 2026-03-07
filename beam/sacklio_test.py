@@ -20,11 +20,11 @@ import apache_beam as beam
 from apache_beam.testing import test_pipeline
 from apache_beam.testing import util
 
-from bagz.beam import bagzio
-import bagz
+from sackli.beam import sacklio
+import sackli
 
 
-class BagzioTest(parameterized.TestCase):
+class SackliioTest(parameterized.TestCase):
 
   @parameterized.parameters(
       'output@2.bagz',
@@ -40,10 +40,10 @@ class BagzioTest(parameterized.TestCase):
     records = [b'a', b'b', b'c', b'd']
 
     with test_pipeline.TestPipeline() as p:
-      _ = p | beam.Create(records) | bagzio.WriteToBagz(name)
+      _ = p | beam.Create(records) | sacklio.WriteToSackli(name)
 
     # Verify the output
-    reader = bagz.Reader(name[:-2] if name.endswith('@0') else name)
+    reader = sackli.Reader(name[:-2] if name.endswith('@0') else name)
     self.assertCountEqual(reader.read(), records)
 
   @parameterized.named_parameters(
@@ -51,11 +51,11 @@ class BagzioTest(parameterized.TestCase):
       ('no_sharding', 'output@2'),
       ('bad_extension', 'output@2.bagzext'),
   )
-  def test_write_to_bagz_invalid_paths(self, file_path):
+  def test_write_to_sackli_invalid_paths(self, file_path):
     with self.assertRaisesRegex(
         ValueError, f'File path "{file_path}" must be in the form'
     ):
-      bagzio.WriteToBagz(file_path)
+      sacklio.WriteToSackli(file_path)
 
   @parameterized.parameters(
       'output@2.bagz',
@@ -71,10 +71,10 @@ class BagzioTest(parameterized.TestCase):
     records = [b'a', b'b', b'c', b'd']
 
     with test_pipeline.TestPipeline() as p:
-      _ = p | beam.Create(records) | bagzio.WriteToBagz(name)
+      _ = p | beam.Create(records) | sacklio.WriteToSackli(name)
 
     with test_pipeline.TestPipeline() as p:
-      read_records = p | bagzio.ReadFromBagz(
+      read_records = p | sacklio.ReadFromSackli(
           name[:-2] if name.endswith('@0') else name
       )
       util.assert_that(read_records, util.equal_to(records))

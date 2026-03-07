@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Reference implementation of Bagz reader for POSIX systems.
+// Reference implementation of Sackli reader for POSIX systems.
 
-#ifndef BAGZ_SRC_BAGZ_READER_H_
-#define BAGZ_SRC_BAGZ_READER_H_
+#ifndef SACKLI_SRC_SACKLI_READER_H_
+#define SACKLI_SRC_SACKLI_READER_H_
 
 #include <cstddef>
 #include <cstdint>
@@ -32,14 +32,14 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
-#include "src/bagz_options.h"
+#include "src/sackli_options.h"
 #include "src/file/file_system/pread_file.h"
 
-namespace bagz {
+namespace sackli {
 
-// BagzReader for reading a collection of Bagz-formatted shards.
+// SackliReader for reading a collection of Sackli-formatted shards.
 // See README.md for details on the format.
-class BagzReader {
+class SackliReader {
  public:
   // Opening options.
   struct Options {
@@ -67,14 +67,14 @@ class BagzReader {
     std::optional<size_t> read_ahead_bytes;
   };
 
-  // Handle to a record in a Bagz-formatted file.
+  // Handle to a record in a Sackli-formatted file.
   struct Handle {
     size_t shard;
     uint64_t offset;
     uint64_t num_bytes;
   };
 
-  // Opens collection of Bagz-formatted shards using existing PReadFiles.
+  // Opens collection of Sackli-formatted shards using existing PReadFiles.
   //
   // The `options` parameter contains the opening options as described above.
   //
@@ -86,12 +86,12 @@ class BagzReader {
   //
   // An error is returned if the files are not in the correct format or if the
   // constraints are not met.
-  static absl::StatusOr<BagzReader> OpenFiles(
+  static absl::StatusOr<SackliReader> OpenFiles(
       absl::Span<absl_nonnull std::unique_ptr<PReadFile>> record_files,
       absl::Span<absl_nonnull std::unique_ptr<PReadFile>> limits_files,
       Options options);
 
-  // Opens a collection of Bagz-formatted files (shards).
+  // Opens a collection of Sackli-formatted files (shards).
   //
   // `filespec` is either:
   //
@@ -104,11 +104,11 @@ class BagzReader {
   //
   // Returns an error if the files fail to open or are not in the correct
   // format.
-  static absl::StatusOr<BagzReader> Open(absl::string_view filespec,
+  static absl::StatusOr<SackliReader> Open(absl::string_view filespec,
                                          Options options);
 
   // Returns view of the records in the bag.
-  absl::StatusOr<BagzReader> Slice(size_t start, int64_t step,
+  absl::StatusOr<SackliReader> Slice(size_t start, int64_t step,
                                    size_t length) const;
 
   // Returns the opening options.
@@ -216,14 +216,14 @@ class BagzReader {
       Handle handle,
       absl::FunctionRef<absl::Span<char>(size_t record_size)> allocate) const;
 
-  BagzReader() = default;
-  BagzReader(BagzReader&&) = default;
-  BagzReader(const BagzReader&) = default;
-  BagzReader& operator=(BagzReader&&) = default;
+  SackliReader() = default;
+  SackliReader(SackliReader&&) = default;
+  SackliReader(const SackliReader&) = default;
+  SackliReader& operator=(SackliReader&&) = default;
 
  private:
   struct State;
-  BagzReader(std::shared_ptr<const State> state, size_t slice_start,
+  SackliReader(std::shared_ptr<const State> state, size_t slice_start,
              int64_t slice_step, size_t slice_length)
       : state_(std::move(state)),
         slice_start_(slice_start),
@@ -235,6 +235,6 @@ class BagzReader {
   size_t slice_length_;
 };
 
-}  // namespace bagz
+}  // namespace sackli
 
-#endif  // BAGZ_SRC_BAGZ_READER_H_
+#endif  // SACKLI_SRC_SACKLI_READER_H_

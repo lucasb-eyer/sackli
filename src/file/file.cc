@@ -33,7 +33,7 @@
 #include "src/file/file_system/write_file.h"
 #include "src/file/registry/file_system_registry.h"
 
-namespace bagz::file {
+namespace sackli::file {
 namespace {
 
 absl::Status Error(const absl::Status& status, absl::string_view operation,
@@ -145,4 +145,4 @@ BulkOpenPRead(absl::string_view file_spec_with_prefix,
   return result;
 }
 
-}  // namespace bagz::file
+}  // namespace sackli::file

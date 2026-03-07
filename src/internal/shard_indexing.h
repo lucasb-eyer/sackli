@@ -17,7 +17,7 @@
 //
 // Concatenating shards:
 //
-// Example if our Bagz-formatted files have the sizes [8, 4, 0, 5]. Then the
+// Example if our Sackli-formatted files have the sizes [8, 4, 0, 5]. Then the
 // `global_index` with `[0, 17)` will map to `shard` and `shard_index`:
 //
 //        | shard_index
@@ -53,7 +53,7 @@
 // In interleaved sharding, we assign the global_index in round robin fashion
 // to each shard.
 //
-// Example if 3 Bagz-formatted files have a total of 17 records. Then the
+// Example if 3 Sackli-formatted files have a total of 17 records. Then the
 // `global_index` with `[0, 17)` will map to `shard` and `shard_index`:
 //
 //        | shard_index
@@ -82,14 +82,14 @@
 // 15           | 0     | 5
 // 16           | 1     | 5
 
-#ifndef BAGZ_SRC_INTERNAL_SHARD_INDEXING_H_
-#define BAGZ_SRC_INTERNAL_SHARD_INDEXING_H_
+#ifndef SACKLI_SRC_INTERNAL_SHARD_INDEXING_H_
+#define SACKLI_SRC_INTERNAL_SHARD_INDEXING_H_
 
 #include <cstddef>
 #include <utility>
 #include <vector>
 
-namespace bagz::internal {
+namespace sackli::internal {
 
 // The shard and shard_index of a global index.
 struct ShardIndex {
@@ -146,6 +146,6 @@ class ShardIndexing {
   bool is_interleaved_;
 };
 
-}  // namespace bagz::internal
+}  // namespace sackli::internal
 
-#endif  // BAGZ_SRC_INTERNAL_SHARD_INDEXING_H_
+#endif  // SACKLI_SRC_INTERNAL_SHARD_INDEXING_H_

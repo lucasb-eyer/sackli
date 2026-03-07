@@ -45,7 +45,7 @@
 #include <aws/s3/model/ListObjectsV2Request.h>
 #include <aws/s3/model/PutObjectRequest.h>
 
-namespace bagz {
+namespace sackli {
 namespace {
 
 constexpr int kMaxParallelism = 100;
@@ -357,7 +357,7 @@ S3FileSystem::BulkOpenPRead(absl::string_view filespec_without_prefix,
 
             if (!absl::c_is_sorted(file_names)) {
               return absl::InternalError(
-                  "When opening the bagz in bulk, the file names are not "
+                  "When opening the sackli in bulk, the file names are not "
                   "sorted.");
             }
 
@@ -384,4 +384,4 @@ S3FileSystem::BulkOpenPRead(absl::string_view filespec_without_prefix,
   return all_files;
 }
 
-}  // namespace bagz
+}  // namespace sackli

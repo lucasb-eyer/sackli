@@ -164,12 +164,12 @@ class Reader(Sequence[bytes]):
         limits_storage: LimitsStorage = ...,
         max_parallelism: int = ...,
     ) -> None:
-      """Options for creating the bagz.Reader."""
+      """Options for creating the sackli.Reader."""
 
   def __init__(
       self, file_spec: os.PathLike[str] | str, options: Reader.Options = ...
   ) -> None:
-    """Opens a collection of Bagz-formatted files (shards).
+    """Opens a collection of Sackli-formatted files (shards).
 
     Args:
       file_spec: is either:
@@ -177,7 +177,7 @@ class Reader(Sequence[bytes]):
         * sharded file-spec (e.g. "fs:/path/to/foo@100.bagz").
         * comma-separated list of filenames and sharded file-specs (e.g.
           "fs:/path/to/f@3.bagz,fs:/path/to/bar.bagz").
-      options: options to use when reading, see `bagz.Reader.Options`.
+      options: options to use when reading, see `sackli.Reader.Options`.
     """
 
   def count(self, value: bytes) -> int:
@@ -287,7 +287,7 @@ class Writer:
             CompressionAutoDetect | CompressionNone | CompressionZstd
         ) = ...,
     ) -> None:
-      """Options for creating the bagz.Writer.
+      """Options for creating the sackli.Writer.
 
       Args:
         limits_placement: Placement of the limits section on close defaulting to
@@ -298,14 +298,14 @@ class Writer:
   def __init__(
       self, filename: os.PathLike[str] | str, options: Writer.Options = ...
   ) -> None:
-    """Open a single Bagz file shard for writing.
+    """Open a single Sackli file shard for writing.
 
     Use as a context manager to ensure the file is closed.
 
     Example:
 
     ```python
-    with bagz.Writer(filename) as writer:
+    with sackli.Writer(filename) as writer:
       for record in records:
         writer.write(record)
     ```
@@ -313,11 +313,11 @@ class Writer:
     Args:
       filename: Filename to open for writing. During writing, a limits file will
         be created with the same name as the filename with the prefix "limits.".
-      options: See `bagz.Writer.Options`.
+      options: See `sackli.Writer.Options`.
     """
 
   def close(self) -> None:
-    """Closes the BagzWriter.
+    """Closes the SackliWriter.
 
     When created with `options.limits_placement`
 
@@ -326,22 +326,22 @@ class Writer:
       and deleted. 'records' is closed.
 
     Throws an error if any of the file operations fail. The data that was
-    successfully written will be recoverable using `bagz.Reader` regardless of
+    successfully written will be recoverable using `sackli.Reader` regardless of
     the `limits` placement.
     """
 
   def flush(self) -> None:
-    """Flushes the BagzWriter.
+    """Flushes the SackliWriter.
 
     Calls `Flush` on the 'records' and 'limits'. When completed, data written so
-    far will be available to be read using `bagz.Reader`.
+    far will be available to be read using `sackli.Reader`.
 
     Throws an error either if the 'records' or 'limits' FileWriters fail to
     flush.
     """
 
   def write(self, record: str | bytes) -> None:
-    """Writes a record to the Bagz file.
+    """Writes a record to the Sackli file.
 
     Compresses according to the `compression` option. Writes may be buffered but
     can be flushed with `flush`.

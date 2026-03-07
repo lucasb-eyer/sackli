@@ -1,88 +1,74 @@
-# Bagz
+# Säckli
 
-## Freethreading fork
+This is a friendly fork of [bagz](https://github.com/google-deepmind/bagz).
 
-This is a fork of [bagz]() which adds freethreading (nogil) support and wheels.
-It publishes to PyPI as `bagz-freethreading` but still imports as
-`bagz`. Do not install both `bagz` and `bagz-freethreading` at the same time.
+Additions so far:
+- Merge some PRs such as [S3 support PR by @KefanXIAO](https://github.com/google-deepmind/bagz/pull/5) and [compile fixes](https://github.com/google-deepmind/bagz/pull/4).
+- Make it compatible to Python versions past 3.13.
+- Make it compatible with free-threading (nogil) Python.
+- Add CI, stress-tests and automatic wheel releases to PyPI.
 
-```sh
-uv pip install bagz-freethreading
-```
-
-Versioning for this fork follows upstream and uses PEP 440 post-releases,
-for example `0.2.0.post1`, `0.2.0.post2`, and so on. When upstream moves to
-`0.3.0`, this fork will continue as `0.3.0.post1`.
-
-What follows is the original readme.
+Versioning of this fork is detached from the original bagz library at the point it was forked (v0.2.0).
 
 ## Overview
 
-*Bagz* is a format for storing a sequence of byte-array records, typically
-serialised protocol buffers. It supports per-record compression and fast
-index-based lookup. All indexing is zero based.
+*Säckli* is a format for storing a sequence of byte-array records.
+It supports per-record compression and fast index-based lookup.
+All indexing is zero based.
 
 ## Installation
 
-To install Bagz from source we recommend using [uv](https://docs.astral.sh/uv/).
-The install will download required dependencies apart from curl
-(`libcurl-devel`) and OpenSSL (`openssl-devel`). These need to be installed in a
-location that cmake's `find_package` searches.
+The recommended installation on Linux is via the pre-built wheels on PyPI:
 
 ```sh
-uv pip install .
+uv pip install sackli
 ```
 
-For faster local builds when you do not need cloud filesystem support, disable
-GCS and S3 at configure time:
+If you want to build locally to work on this, just `uv pip install .`.
+However, building can be slow because of GCS and S3 support;
+to skip both of these dependencies for much faster builds, you can do:
 
 ```sh
-CMAKE_ARGS="-DBAGZ_ENABLE_GCS=OFF -DBAGZ_ENABLE_S3=OFF" uv pip install .
-```
-
-On Linux you can install the latest version from PyPI.
-
-```sh
-uv pip install bagz
+CMAKE_ARGS="-DSACKLI_ENABLE_GCS=OFF -DSACKLI_ENABLE_S3=OFF" uv pip install .
 ```
 
 ## Python API
 
 ### Python Reader
 
-Reader for reading a single or sharded Bagz file-set.
+Reader for reading a single or sharded Säckli file-set.
 
 ```python
 from collections.abc import Sequence, Iterable
 
-import bagz
+import sackli
 import numpy as np
 
-# Bagz Readers support random access. The order of elements within a Bagz
+# Säckli Readers support random access. The order of elements within a Säckli
 # file is the order in which they are written. Records are returned as `bytes`
 # objects.
-data = bagz.Reader('/path/to/data.bagz')
+data = sackli.Reader('/path/to/data.bagz')
 
-# Bagz Readers can be configured like this - here we require that the file was
+# Säckli Readers can be configured like this - here we require that the file was
 # written with separate limits.
-data_separate_limits = bagz.Reader('/path/to/data.bagz', bagz.Reader.Options(
-    limits_placement=bagz.LimitsPlacement.SEPARATE,
+data_separate_limits = sackli.Reader('/path/to/data.bagz', sackli.Reader.Options(
+    limits_placement=sackli.LimitsPlacement.SEPARATE,
 ))
 
-# Bagz Readers are Sequences and support slicing, iterating, etc.
+# Säckli Readers are Sequences and support slicing, iterating, etc.
 assert isinstance(data, Sequence)
 
-# Bagz Readers have a length.
+# Säckli Readers have a length.
 assert len(data) > 10
 
 # Can access record by row-index.
 fifth_value: bytes = data[5]
 
 # Can slice.
-data_from_5: bagz.Reader = data[5:]
+data_from_5: sackli.Reader = data[5:]
 
 # Slices are still Readers.
-assert isinstance(data_from_5, bagz.Reader)
+assert isinstance(data_from_5, sackli.Reader)
 
 assert data_from_5[0] == fifth_value
 
@@ -124,38 +110,38 @@ You can use `Index` to find the first index of a record and `MultiIndex` to find
 all instances of an item.
 
 ```python
-keys = bagz.Reader('/path/to/keys.bag')
+keys = sackli.Reader('/path/to/keys.bag')
 # Get the index of the first occurrence of key.
-index = bagz.Index(keys)
+index = sackli.Index(keys)
 key_index: int = index[b'example_key']
 
 # Get all occurrences of key.
-multi_index = bagz.MultiIndex(keys)
+multi_index = sackli.MultiIndex(keys)
 all_indices: list[int] = multi_index[b'example_key']
 ```
 
 ### Python Writer
 
-For writing a single Bagz file.
+For writing a single Säckli file.
 
 Example:
 
 ```python
-import bagz
+import sackli
 
 # Compression is selected based on the file extension:
 # `.bagz` will use Zstandard compression with default settings.
 # `.bag` will use no compression.
-with bagz.Writer('/path/to/data.bagz') as writer:
+with sackli.Writer('/path/to/data.bagz') as writer:
   for d in generate_records():
     writer.write(d)
 
 # Adjust compression level explicitly.
 # Note this will no longer use the extension to detemine whether to compress.
-with bagz.Writer(
+with sackli.Writer(
     '/path/to/data.bagz',
-    bagz.Writer.Options(
-        compression=bagz.CompressionZstd(level=3)
+    sackli.Writer.Options(
+        compression=sackli.CompressionZstd(level=3)
     ),
 ) as writer:
   for d in generate_records():
@@ -166,42 +152,42 @@ with bagz.Writer(
 
 ### Reader Options
 
-`bagz.Reader.Options` has these optional arguments.
+`sackli.Reader.Options` has these optional arguments.
 
 *   `compression`: Can be one of:
-    *   `bagz.CompressionAutoDetect()`: Default - Uses extension whether to
+    *   `sackli.CompressionAutoDetect()`: Default - Uses extension whether to
         compress. (`.bagz` - Compressed (ZStandard), `.bag` - Uncompressed)
-    *   `bagz.CompressionNone()`: Records are not decompressed.
-    *   `bagz.CompressionZstd()`: Records are decompressed using Zstandard.
+    *   `sackli.CompressionNone()`: Records are not decompressed.
+    *   `sackli.CompressionZstd()`: Records are decompressed using Zstandard.
 *   `limits_placement`: Can be one of:
-    *   `bagz.LimitsPlacement.TAIL`: Default- Reads limits from a tail of file.
-    *   `bagz.LimitsPlacement.SEPARATE`: Reads limits from a separate file.
+    *   `sackli.LimitsPlacement.TAIL`: Default- Reads limits from a tail of file.
+    *   `sackli.LimitsPlacement.SEPARATE`: Reads limits from a separate file.
 *   `limits_storage`: Can be one of:
-    *   `bagz.LimitsStorage.ON_DISK`: Default - Reads limits from disk for each
+    *   `sackli.LimitsStorage.ON_DISK`: Default - Reads limits from disk for each
         read.
-    *   `bagz.LimitsStorage.IN_MEMORY`: Reads all limits from disk in one go.
+    *   `sackli.LimitsStorage.IN_MEMORY`: Reads all limits from disk in one go.
 *   `max_parallelism`: Default number of threads when reading many records.
 *   `sharding_layout`: Can be one of:
-    *   `bagz.ShardingLayout.CONCATENATED`: Default - See [Sharding](#sharding)
-    *   `bagz.ShardingLayout.INTERLEAVED`: See [Sharding](#sharding)
+    *   `sackli.ShardingLayout.CONCATENATED`: Default - See [Sharding](#sharding)
+    *   `sackli.ShardingLayout.INTERLEAVED`: See [Sharding](#sharding)
 
 ### Writer Options
 
-`bagz.Writer.Options` has these optional arguments.
+`sackli.Writer.Options` has these optional arguments.
 
 *   `compression`: Can be one of:
-    *   `bagz.CompressionAutoDetect()`: Default - Uses extension whether to
+    *   `sackli.CompressionAutoDetect()`: Default - Uses extension whether to
         compress. (`.bagz` - Compressed (Zstandard), `.bag` - Uncompressed)
-    *   `bagz.CompressionNone()`: Records are not compressed.
-    *   `bagz.CompressionZstd(level = 3)`: Records are compressed using
+    *   `sackli.CompressionNone()`: Records are not compressed.
+    *   `sackli.CompressionZstd(level = 3)`: Records are compressed using
         Zstandard the level of the compression can be specified.
 *   `limits_placement`: Can be one of:
-    *   `bagz.LimitsPlacement.TAIL`: Default - Writes limits to a tail of file.
-    *   `bagz.LimitsPlacement.SEPARATE`: Writes limits to a separate file.
+    *   `sackli.LimitsPlacement.TAIL`: Default - Writes limits to a tail of file.
+    *   `sackli.LimitsPlacement.SEPARATE`: Writes limits to a separate file.
 
 ## Apache Beam Support
 
-Bagz also provides Apache Beam connectors for reading and writing Bagz files in
+Säckli also provides Apache Beam connectors for reading and writing Säckli files in
 Beam pipelines.
 
 Ensure you have Apache Beam installed.
@@ -209,26 +195,26 @@ Ensure you have Apache Beam installed.
 uv pip install apache_beam
 ```
 
-### Bagz Source
+### Säckli Source
 
 ```python
 import apache_beam as beam
-from bagz.beam import bagzio
+from sackli.beam import sacklio
 import tensorflow as tf
 
 with beam.Pipeline() as pipeline:
   examples = (
       pipeline
-      | 'ReadData' >> bagzio.ReadFromBagz('/path/to/your/data@*.bagz')
+      | 'ReadData' >> sacklio.ReadFromSackli('/path/to/your/data@*.bagz')
       | 'Decode' >> beam.Map(tf.train.Example.FromString)
   )
   # Continue your pipeline.
 ```
 
-#### Bagz Sink
+#### Säckli Sink
 
 ```python
-from bagz.beam import bagzio
+from sackli.beam import sacklio
 import tensorflow as tf
 
 def create_tf_example(data):
@@ -245,13 +231,13 @@ with beam.Pipeline() as pipeline:
       pipeline
       | 'CreateData' >> beam.Create(data)
       | 'Encode' >> beam.Map(lambda x: create_tf_example(x).SerializeToString())
-      | 'WriteData' >> bagzio.WriteToBagz('/path/to/output/data@*.bagz')
+      | 'WriteData' >> sacklio.WriteToSackli('/path/to/output/data@*.bagz')
   )
 ```
 
 ## GCS Support
 
-Bagz supports Posix file-systems and Google Cloud Storage (GCS). If you have
+Säckli supports Posix file-systems and Google Cloud Storage (GCS). If you have
 files on GCS you can access them with using the prefix `/gs:` to the path. These
 examples assume you have gcloud CLI installed.
 
@@ -266,28 +252,28 @@ Then use the 'gs:' file-system prefix.
 
 ```python
 import pathlib
-import bagz
+import sackli
 
 # (This may freeze if you have not configured the project.)
-reader = bagz.Reader('gs://your-bucket-name/your-file.bagz')
+reader = sackli.Reader('gs://your-bucket-name/your-file.bagz')
 
 # Path supports a leading slash to work well with pathlib.
 bucket = pathlib.Path('/gs://your-bucket-name')
-reader = bagz.Reader(bucket / 'your-file.bagz')
+reader = sackli.Reader(bucket / 'your-file.bagz')
 ```
 
 ## Sharding
 
-An ordered collection of Bagz-formatted files ("shards") may be opened together
+An ordered collection of Säckli-formatted files ("shards") may be opened together
 and indexed via a single `global-index`. The `global-index` is mapped to a
 `shard` and an index within that shard (`shard-index`) in one of two ways:
 
 1.  **Concatenated** (default). Indexing is equivalent to the records in each
-    Bagz-formatted shard being concatenated into a single sequence of records.
+    Säckli-formatted shard being concatenated into a single sequence of records.
 
     Example:
 
-    When opening four Bagz-formatted files with sizes `[8, 4, 0, 5]`, the
+    When opening four Säckli-formatted files with sizes `[8, 4, 0, 5]`, the
     `global-index` with range `[0, 17)` (shown as the table entries) maps to
     `shard` and `shard-index` like this:
 
@@ -320,7 +306,7 @@ and indexed via a single `global-index`. The `global-index` is mapped to a
 
     Example:
 
-    When opening three Bagz-formatted files with sizes `[6, 6, 5]`, the
+    When opening three Säckli-formatted files with sizes `[6, 6, 5]`, the
     `global-index` with range `[0, 17)` (shown as the table entries) maps to
     `shard` and `shard-index` like this:
 
@@ -348,9 +334,9 @@ and indexed via a single `global-index`. The `global-index` is mapped to a
     `15`           | `00000-of-00003` | `5`
     `16`           | `00001-of-00003` | `5`
 
-## Bagz file format
+## Säckli file format
 
-The Bagz file format has two parts: the `records` section and the `limits`
+The Säckli file format has two parts: the `records` section and the `limits`
 section.
 
 *   The `records` section consists of the concatenation of all (possibly
@@ -365,7 +351,7 @@ in separate files.
 
 ### Tail-limits example
 
-Given Bagz file formatted file with the following 3 uncompressed records:
+Given Säckli file formatted file with the following 3 uncompressed records:
 
 Records  |
 -------- |
@@ -373,7 +359,7 @@ Records  |
 `123`    |
 `catcat` |
 
-The raw bytes of the Bagz file formated file corresponding to the records above:
+The raw bytes of the Säckli file formated file corresponding to the records above:
 
 ```
 0x61 a 0x62 b 0x63 c 0x64 d 0x65 e 0x66 f
@@ -387,7 +373,3 @@ The raw bytes of the Bagz file formated file corresponding to the records above:
 The last 8 bytes represent the end-offset of the last record. This is also the
 start of the `limits` section. Therefore reading the last 8 bytes will directly
 tell you the offset of the `records`/`limits` boundary.
-
-## Disclaimer
-
-This is not an official Google product.

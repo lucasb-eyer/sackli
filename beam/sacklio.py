@@ -1,4 +1,4 @@
-"""Bagz IO module for Apache Beam."""
+"""Sackli IO module for Apache Beam."""
 
 # Copyright 2025 Google LLC
 #
@@ -28,11 +28,11 @@ from apache_beam.io import iobase
 from apache_beam.io import range_trackers
 from apache_beam.transforms import display
 
-import bagz
+import sackli
 
 
-class WriteToBagz(transforms.PTransform):
-  """PTransform for a disk-based write to Bagz."""
+class WriteToSackli(transforms.PTransform):
+  """PTransform for a disk-based write to Sackli."""
 
   def __init__(
       self,
@@ -40,7 +40,7 @@ class WriteToBagz(transforms.PTransform):
       coder: coders.Coder = coders.BytesCoder(),
       compression_type: filesystem.CompressionTypes = filesystem.CompressionTypes.AUTO,
   ):
-    """Initializes a PTransform that writes to Bagz.
+    """Initializes a PTransform that writes to Sackli.
 
     Args:
       file_path: The path to the output file. The path must be in the form:
@@ -87,7 +87,7 @@ class WriteToBagz(transforms.PTransform):
           'number of shards. Or @0 for no sharding.'
       )
 
-    self._sink = _BagzSink(
+    self._sink = _SackliSink(
         file_path_prefix=os.path.join(dirname, name),
         file_name_suffix=suffix,
         num_shards=num_shards,
@@ -100,8 +100,8 @@ class WriteToBagz(transforms.PTransform):
     return pcoll | io.iobase.Write(self._sink)
 
 
-class _BagzSink(filebasedsink.FileBasedSink):
-  """Sink Class for use in Bagz PTransform."""
+class _SackliSink(filebasedsink.FileBasedSink):
+  """Sink Class for use in Sackli PTransform."""
 
   def __init__(
       self,
@@ -124,18 +124,18 @@ class _BagzSink(filebasedsink.FileBasedSink):
         compression_type=compression_type,
     )
 
-  def open(self, temp_path: str) -> bagz.Writer:
-    return bagz.Writer(temp_path)
+  def open(self, temp_path: str) -> sackli.Writer:
+    return sackli.Writer(temp_path)
 
-  def close(self, writer: bagz.Writer) -> None:
+  def close(self, writer: sackli.Writer) -> None:
     writer.close()
 
-  def write_encoded_record(self, writer: bagz.Writer, value: bytes) -> None:
+  def write_encoded_record(self, writer: sackli.Writer, value: bytes) -> None:
     writer.write(value)
 
 
-class ReadFromBagz(transforms.PTransform):
-  """PTransform for reading from Bagz files."""
+class ReadFromSackli(transforms.PTransform):
+  """PTransform for reading from Sackli files."""
 
   def __init__(
       self,
@@ -143,14 +143,14 @@ class ReadFromBagz(transforms.PTransform):
       coder: coders.Coder = coders.BytesCoder(),
       compression_type: filesystem.CompressionTypes = filesystem.CompressionTypes.AUTO,
   ):
-    """Initializes a PTransform that reads from Bagz files.
+    """Initializes a PTransform that reads from Sackli files.
 
     Args:
       file_pattern: The file pattern to match the files to read.
       coder: The coder to use for decoding the elements.
       compression_type: The compression type to use.
     """
-    self._source = _BagzSource(
+    self._source = _SackliSource(
         os.fspath(file_pattern),
         coder=coder,
         compression_type=compression_type,
@@ -160,8 +160,8 @@ class ReadFromBagz(transforms.PTransform):
     return pcoll | iobase.Read(self._source)
 
 
-class _BagzSource(iobase.BoundedSource):
-  """Source Class for use in Bagz PTransform."""
+class _SackliSource(iobase.BoundedSource):
+  """Source Class for use in Sackli PTransform."""
 
   def __init__(
       self,
@@ -172,11 +172,11 @@ class _BagzSource(iobase.BoundedSource):
     self._file_pattern = file_pattern
     self._coder = coder
     self._compression_type = compression_type
-    self._reader = bagz.Reader(self._file_pattern)
+    self._reader = sackli.Reader(self._file_pattern)
 
   def __setstate__(self, state):
     self.__dict__.update(state)
-    self._reader = bagz.Reader(self._file_pattern)
+    self._reader = sackli.Reader(self._file_pattern)
 
   def __getstate__(self):
     result = self.__dict__.copy()
@@ -217,7 +217,7 @@ class _BagzSource(iobase.BoundedSource):
   def read(
       self, range_tracker: range_trackers.OffsetRangeTracker
   ) -> Iterable[Any]:
-    return _BagzReadIterator(
+    return _SackliReadIterator(
         reader=self._reader,
         range_tracker=range_tracker,
         coder=self._coder,
@@ -241,13 +241,13 @@ class _BagzSource(iobase.BoundedSource):
     )
 
 
-class _BagzReadIterator(Iterable[Any]):
-  """Iterator for reading records from a Bagz file."""
+class _SackliReadIterator(Iterable[Any]):
+  """Iterator for reading records from a Sackli file."""
 
   def __init__(
       self,
       *,
-      reader: bagz.Reader,
+      reader: sackli.Reader,
       range_tracker: range_trackers.OffsetRangeTracker,
       coder: coders.Coder,
   ):

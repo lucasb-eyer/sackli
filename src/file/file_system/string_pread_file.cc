@@ -21,7 +21,7 @@
 #include "absl/status/status.h"
 #include "absl/strings/string_view.h"
 
-namespace bagz {
+namespace sackli {
 
 absl::Status StringPReadFile::PRead(
     size_t offset, size_t num_bytes,
@@ -42,4 +42,4 @@ absl::Status StringPReadFile::PRead(
   return absl::OkStatus();
 }
 
-}  // namespace bagz
+}  // namespace sackli

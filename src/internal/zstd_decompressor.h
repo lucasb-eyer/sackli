@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef BAGZ_SRC_INTERNAL_ZSTD_DECOMPRESSOR_H_
-#define BAGZ_SRC_INTERNAL_ZSTD_DECOMPRESSOR_H_
+#ifndef SACKLI_SRC_INTERNAL_ZSTD_DECOMPRESSOR_H_
+#define SACKLI_SRC_INTERNAL_ZSTD_DECOMPRESSOR_H_
 
 #include <cstddef>
 #include <memory>
@@ -24,7 +24,7 @@
 #include "absl/types/span.h"
 #include "zstd.h"
 
-namespace bagz::internal {
+namespace sackli::internal {
 
 // C++ wrapper over ZStandard (ZSTD) decompression functions.
 class ZstdDecompressor {
@@ -46,7 +46,7 @@ class ZstdDecompressor {
       absl::FunctionRef<absl::Span<char>(size_t size)> allocate_output);
 
  private:
-  // Bagz does not write streamed data, but we want to support reading it.
+  // Sackli does not write streamed data, but we want to support reading it.
   absl::Status DecompressStreamed(
       absl::string_view compressed,
       absl::FunctionRef<absl::Span<char>(size_t size)> allocate_output);
@@ -68,6 +68,6 @@ class ZstdDecompressor {
   std::unique_ptr<char[]> output_buffer_;
 };
 
-}  // namespace bagz::internal
+}  // namespace sackli::internal
 
-#endif  // BAGZ_SRC_INTERNAL_ZSTD_DECOMPRESSOR_H_
+#endif  // SACKLI_SRC_INTERNAL_ZSTD_DECOMPRESSOR_H_

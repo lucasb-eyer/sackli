@@ -42,11 +42,11 @@ jobs:
             scikit-build-core setuptools_scm \
             cmake ninja pytest absl-py numpy
 
-      - name: Install bagz without cloud filesystems
+      - name: Install sackli without cloud filesystems
         run: |
           python -m pip install -e . --no-build-isolation \
-            --config-settings=cmake.args=-DBAGZ_ENABLE_GCS=OFF \
-            --config-settings=cmake.args=-DBAGZ_ENABLE_S3=OFF
+            --config-settings=cmake.args=-DSACKLI_ENABLE_GCS=OFF \
+            --config-settings=cmake.args=-DSACKLI_ENABLE_S3=OFF
 
       - name: Run Python tests
-        run: python -m pytest -q src/python/bagz_test.py
+        run: python -m pytest -q src/python/sackli_test.py

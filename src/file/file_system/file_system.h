@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef BAGZ_SRC_FILE_FILE_SYSTEM_FILE_SYSTEM_H_
-#define BAGZ_SRC_FILE_FILE_SYSTEM_FILE_SYSTEM_H_
+#ifndef SACKLI_SRC_FILE_FILE_SYSTEM_FILE_SYSTEM_H_
+#define SACKLI_SRC_FILE_FILE_SYSTEM_FILE_SYSTEM_H_
 
 #include <cstdint>
 #include <memory>
@@ -26,11 +26,11 @@
 #include "src/file/file_system/pread_file.h"
 #include "src/file/file_system/write_file.h"
 
-namespace bagz {
+namespace sackli {
 
 // Custom file-system interface. File-systems are registered with a prefix but
 // filenames forwarded to this interface will not include the prefix. Only
-// supports operations that are required for Bagz.
+// supports operations that are required for Sackli.
 // Register new file-systems in file_system/register_file_systems.cc.
 // Test with file_system/file_system_test_suite.h.
 class FileSystem {
@@ -64,6 +64,6 @@ class FileSystem {
                 absl::string_view options) const;
 };
 
-}  // namespace bagz
+}  // namespace sackli
 
-#endif  // BAGZ_SRC_FILE_FILE_SYSTEM_FILE_SYSTEM_H_
+#endif  // SACKLI_SRC_FILE_FILE_SYSTEM_FILE_SYSTEM_H_

@@ -14,13 +14,13 @@
 
 # Macro for creating static or header-only libraries
 # Usage:
-# bagz_cc_library(library_name
+# sackli_cc_library(library_name
 #   [SOURCES src1.cc src2.cc ...]
 #   [HEADERS hdr1.h hdr2.h ...]
 #   [DEPS dep1 dep2 ...]
 #   [ALWAYS_LINK_DEPS dep1 dep2 ...]
 # )
-macro(bagz_cc_library NAME)
+macro(sackli_cc_library NAME)
     cmake_parse_arguments(
         PARSED_ARGS
         "" # OPTIONS
@@ -39,7 +39,7 @@ macro(bagz_cc_library NAME)
     else()
         # Create a header-only (INTERFACE) library
         if(NOT PARSED_ARGS_HEADERS)
-            message(WARNING "bagz_cc_library created header-only library ${NAME} with no HEADERS specified.")
+            message(WARNING "sackli_cc_library created header-only library ${NAME} with no HEADERS specified.")
         endif()
         add_library(${NAME} INTERFACE)
         target_include_directories(${NAME} INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -63,12 +63,12 @@ endmacro()
 
 # Macro for creating pybind11 Python modules
 # Usage:
-# bagz_pybind11_extension(module_name
+# sackli_pybind11_extension(module_name
 #   SOURCES src1.cc src2.cc ...
 #   [DEPS dep1 dep2 ...]
 #   [ALWAYS_LINK_DEPS dep1 dep2 ...]
 # )
-macro(bagz_pybind11_extension NAME)
+macro(sackli_pybind11_extension NAME)
     cmake_parse_arguments(
         PARSED_ARGS
         "" # OPTIONS
@@ -78,7 +78,7 @@ macro(bagz_pybind11_extension NAME)
     )
 
     if(NOT PARSED_ARGS_SOURCES)
-        message(FATAL_ERROR "bagz_pybind11_extension ${NAME} requires SOURCES to be specified.")
+        message(FATAL_ERROR "sackli_pybind11_extension ${NAME} requires SOURCES to be specified.")
     endif()
 
     pybind11_add_module(${NAME} MODULE ${PARSED_ARGS_SOURCES})

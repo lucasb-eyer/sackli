@@ -47,7 +47,7 @@
 #include "google/cloud/storage/upload_options.h"
 #include "google/cloud/storage/well_known_parameters.h"
 
-namespace bagz {
+namespace sackli {
 namespace {
 
 constexpr int kMaxParallelism = 100;
@@ -261,7 +261,7 @@ GcsFileSystem::BulkOpenPRead(absl::string_view filespec_without_prefix,
 
             if (!absl::c_is_sorted(file_names)) {
               return absl::InternalError(
-                  "When opening the bagz in bulk, the file names are not "
+                  "When opening the sackli in bulk, the file names are not "
                   "sorted.");
             }
 
@@ -288,4 +288,4 @@ GcsFileSystem::BulkOpenPRead(absl::string_view filespec_without_prefix,
   return all_files;
 }
 
-}  // namespace bagz
+}  // namespace sackli

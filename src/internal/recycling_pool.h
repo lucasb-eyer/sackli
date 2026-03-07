@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef BAGZ_SRC_INTERNAL_RECYCLING_POOL_H_
-#define BAGZ_SRC_INTERNAL_RECYCLING_POOL_H_
+#ifndef SACKLI_SRC_INTERNAL_RECYCLING_POOL_H_
+#define SACKLI_SRC_INTERNAL_RECYCLING_POOL_H_
 
 #include <memory>
 #include <utility>
@@ -22,7 +22,7 @@
 #include "absl/base/thread_annotations.h"
 #include "absl/synchronization/mutex.h"
 
-namespace bagz::internal {
+namespace sackli::internal {
 
 // Thread-safe object pool for creating and recycling objects.
 //
@@ -98,6 +98,6 @@ class RecyclingPool {
   absl::Mutex mutex_ ABSL_GUARDED_BY(mutex_);
 };
 
-}  // namespace bagz::internal
+}  // namespace sackli::internal
 
-#endif  // BAGZ_SRC_INTERNAL_RECYCLING_POOL_H_
+#endif  // SACKLI_SRC_INTERNAL_RECYCLING_POOL_H_

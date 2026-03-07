@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "src/internal/bagz_shard_reader.h"
+#include "src/internal/sackli_shard_reader.h"
 
 #include <bit>
 #include <cstddef>
@@ -32,7 +32,7 @@
 #include "src/file/file_system/pread_file.h"
 #include "src/internal/serialize.h"
 
-namespace bagz::internal {
+namespace sackli::internal {
 namespace {
 
 absl::Status ReadIntoUint64(PReadFile& file, size_t offset,
@@ -57,7 +57,7 @@ absl::Status ReadIntoUint64(PReadFile& file, size_t offset,
 
 }  // namespace
 
-absl::StatusOr<BagzShardReader::ByteRange> BagzShardReader::ReadByteRange(
+absl::StatusOr<SackliShardReader::ByteRange> SackliShardReader::ReadByteRange(
     size_t index) const {
   if (index >= size()) {
     return absl::OutOfRangeError(
@@ -85,7 +85,7 @@ absl::StatusOr<BagzShardReader::ByteRange> BagzShardReader::ReadByteRange(
   }
 }
 
-absl::Status BagzShardReader::ReadFromByteRange(
+absl::Status SackliShardReader::ReadFromByteRange(
     const ByteRange& byte_range,
     absl::FunctionRef<void(absl::string_view)> callback) const {
   if (byte_range.offset <= records_->size() && byte_range.length == 0) {
@@ -116,7 +116,7 @@ absl::Status BagzShardReader::ReadFromByteRange(
       });
 }
 
-absl::Status BagzShardReader::Read(
+absl::Status SackliShardReader::Read(
     size_t index,
     absl::FunctionRef<void(absl::string_view record)> callback) const {
   if (auto byte_range = ReadByteRange(index); byte_range.ok()) {
@@ -126,7 +126,7 @@ absl::Status BagzShardReader::Read(
   }
 }
 
-absl::Status BagzShardReader::ReadLimits(size_t index, size_t count,
+absl::Status SackliShardReader::ReadLimits(size_t index, size_t count,
                                          absl::Span<uint64_t> limits) const {
   const size_t num_records = size();
   // Prevent overflow.
@@ -150,7 +150,7 @@ absl::Status BagzShardReader::ReadLimits(size_t index, size_t count,
   }
 }
 
-absl::Status BagzShardReader::ReadFromLimits(
+absl::Status SackliShardReader::ReadFromLimits(
     absl::Span<const uint64_t> limits,
     absl::FunctionRef<bool(size_t index, absl::string_view)> callback) const {
   const size_t records_size = records_->size();
@@ -216,7 +216,7 @@ absl::Status BagzShardReader::ReadFromLimits(
   return absl::OkStatus();
 }
 
-absl::Status BagzShardReader::ReadRange(
+absl::Status SackliShardReader::ReadRange(
     size_t index, size_t count,
     absl::FunctionRef<bool(size_t index, absl::string_view)> callback) const {
   const size_t num_records = size();
@@ -242,4 +242,4 @@ absl::Status BagzShardReader::ReadRange(
   return ReadFromLimits(split_points, callback);
 };
 
-}  // namespace bagz::internal
+}  // namespace sackli::internal

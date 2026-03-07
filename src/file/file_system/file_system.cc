@@ -28,7 +28,7 @@
 #include "src/file/file_system/shard_spec.h"
 #include "src/internal/parallel_do.h"
 
-namespace bagz {
+namespace sackli {
 
 namespace {
 
@@ -62,4 +62,4 @@ FileSystem::BulkOpenPRead(absl::string_view filespec_without_prefix,
   return files;
 }
 
-}  // namespace bagz
+}  // namespace sackli

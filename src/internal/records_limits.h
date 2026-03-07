@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef BAGZ_SRC_INTERNAL_RECORDS_LIMITS_H_
-#define BAGZ_SRC_INTERNAL_RECORDS_LIMITS_H_
+#ifndef SACKLI_SRC_INTERNAL_RECORDS_LIMITS_H_
+#define SACKLI_SRC_INTERNAL_RECORDS_LIMITS_H_
 
 #include <memory>
 
@@ -21,7 +21,7 @@
 #include "absl/status/statusor.h"
 #include "src/file/file_system/pread_file.h"
 
-namespace bagz::internal {
+namespace sackli::internal {
 
 struct RecordsLimits {
   absl_nonnull std::unique_ptr<PReadFile> records;
@@ -32,6 +32,6 @@ struct RecordsLimits {
 absl::StatusOr<RecordsLimits> SplitRecordsAndLimits(
     absl_nonnull std::unique_ptr<PReadFile> bag_content);
 
-}  // namespace bagz::internal
+}  // namespace sackli::internal
 
-#endif  // BAGZ_SRC_INTERNAL_RECORDS_LIMITS_H_
+#endif  // SACKLI_SRC_INTERNAL_RECORDS_LIMITS_H_

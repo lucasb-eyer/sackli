@@ -30,7 +30,7 @@
 #include "src/file/file_system/pread_file.h"
 #include "src/internal/serialize.h"
 
-namespace bagz::internal {
+namespace sackli::internal {
 
 namespace {
 
@@ -132,4 +132,4 @@ absl::StatusOr<RecordsLimits> SplitRecordsAndLimits(
                                            records_end, limits_size)};
 }
 
-}  // namespace bagz::internal
+}  // namespace sackli::internal

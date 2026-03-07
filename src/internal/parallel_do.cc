@@ -29,7 +29,7 @@
 #include "absl/status/status.h"
 #include "absl/time/time.h"
 
-namespace bagz::internal {
+namespace sackli::internal {
 
 absl::Status ParallelDo(size_t num_tasks,
                         absl::FunctionRef<absl::Status(size_t task_id)> func,
@@ -131,4 +131,4 @@ std::unique_ptr<ParallelOperation> ParallelOperation::Create(
   return std::make_unique<ParallelOperationImpl>(std::move(func));
 }
 
-}  // namespace bagz::internal
+}  // namespace sackli::internal

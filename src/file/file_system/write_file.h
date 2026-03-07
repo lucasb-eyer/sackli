@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef BAGZ_SRC_FILE_FILE_SYSTEM_WRITE_FILE_H_
-#define BAGZ_SRC_FILE_FILE_SYSTEM_WRITE_FILE_H_
+#ifndef SACKLI_SRC_FILE_FILE_SYSTEM_WRITE_FILE_H_
+#define SACKLI_SRC_FILE_FILE_SYSTEM_WRITE_FILE_H_
 
 #include "absl/status/status.h"
 #include "absl/strings/string_view.h"
 
-namespace bagz {
+namespace sackli {
 
 // An interface for writing to a file.
 //
@@ -43,6 +43,6 @@ class WriteFile {
   virtual absl::Status Close() = 0;
 };
 
-}  // namespace bagz
+}  // namespace sackli
 
-#endif  // BAGZ_SRC_FILE_FILE_SYSTEM_WRITE_FILE_H_
+#endif  // SACKLI_SRC_FILE_FILE_SYSTEM_WRITE_FILE_H_

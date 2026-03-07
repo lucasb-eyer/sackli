@@ -27,7 +27,7 @@
 #include "absl/types/span.h"
 #include "zstd.h"
 
-namespace bagz::internal {
+namespace sackli::internal {
 
 ZstdDecompressor::ZstdDecompressor(absl::string_view dictionary)
     : ctx_(ZSTD_createDCtx()),
@@ -104,4 +104,4 @@ absl::Status ZstdDecompressor::DecompressStreamed(
   return absl::OkStatus();
 }
 
-}  // namespace bagz::internal
+}  // namespace sackli::internal

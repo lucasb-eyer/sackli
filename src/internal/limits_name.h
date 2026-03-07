@@ -12,20 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef BAGZ_SRC_INTERNAL_LIMITS_NAME_H_
-#define BAGZ_SRC_INTERNAL_LIMITS_NAME_H_
+#ifndef SACKLI_SRC_INTERNAL_LIMITS_NAME_H_
+#define SACKLI_SRC_INTERNAL_LIMITS_NAME_H_
 
 #include <string>
 
 #include "absl/strings/string_view.h"
 
-namespace bagz::internal {
+namespace sackli::internal {
 
 // Returns the name of the limits file for the given filename.
 // `/path/to/foo.bagz` -> `/path/to/limits.foo.bagz`.
 // `foo.bagz` -> `limits.foo.bagz`.
 std::string LimitsName(absl::string_view filename);
 
-}  // namespace bagz::internal
+}  // namespace sackli::internal
 
-#endif  // BAGZ_SRC_INTERNAL_LIMITS_NAME_H_
+#endif  // SACKLI_SRC_INTERNAL_LIMITS_NAME_H_

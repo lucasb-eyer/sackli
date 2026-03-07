@@ -12,16 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef BAGZ_SRC_PYTHON_BAGZ_INDEX_H_
-#define BAGZ_SRC_PYTHON_BAGZ_INDEX_H_
+#ifndef SACKLI_SRC_PYTHON_SACKLI_READER_H_
+#define SACKLI_SRC_PYTHON_SACKLI_READER_H_
 
 
 #include "pybind11/pybind11.h"
 
-namespace bagz {
+namespace sackli {
 
-void RegisterBagzIndex(pybind11::module& m);
+void RegisterSackliReader(pybind11::module& m);
 
-}  // namespace bagz
+}  // namespace sackli
 
-#endif  // BAGZ_SRC_PYTHON_BAGZ_INDEX_H_
+#endif  // SACKLI_SRC_PYTHON_SACKLI_READER_H_

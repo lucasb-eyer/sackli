@@ -12,29 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <Python.h>
+#ifndef SACKLI_SRC_PYTHON_SACKLI_INDEX_H_
+#define SACKLI_SRC_PYTHON_SACKLI_INDEX_H_
 
-#include "src/python/bagz_index.h"
-#include "src/python/bagz_multi_index.h"
-#include "src/python/bagz_options.h"
-#include "src/python/bagz_reader.h"
-#include "src/python/bagz_writer.h"
+
 #include "pybind11/pybind11.h"
 
-namespace bagz {
-namespace {
+namespace sackli {
 
-PYBIND11_MODULE(bagz, m, pybind11::mod_gil_not_used()) {
-  m.doc() = "Bagz Python Bindings";
-  RegisterBagzIndex(m);
-  RegisterBagzMultiIndex(m);
-  RegisterBagzOptions(m);
-  RegisterBagzReader(m);
-  RegisterBagzWriter(m);
+void RegisterSackliIndex(pybind11::module& m);
 
-  // Shim to allow `from bagz import bagz` for backward compatibility.
-  m.attr("bagz") = m;
-}
+}  // namespace sackli
 
-}  // namespace
-}  // namespace bagz
+#endif  // SACKLI_SRC_PYTHON_SACKLI_INDEX_H_

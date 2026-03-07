@@ -27,7 +27,7 @@
 #include "src/file/file_system/file_system.h"
 #include "src/file/registry/register_file_systems.h"
 
-namespace bagz {
+namespace sackli {
 namespace {
 
 absl::once_flag file_system_registry_once;
@@ -103,4 +103,4 @@ absl::Status FileSystemRegistry::Unregister(absl::string_view prefix) {
   }
 }
 
-}  // namespace bagz
+}  // namespace sackli

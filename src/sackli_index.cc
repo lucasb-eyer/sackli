@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "src/bagz_index.h"
+#include "src/sackli_index.h"
 
 #include <cstddef>
 #include <string>
@@ -21,11 +21,11 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/status/statusor.h"
-#include "src/bagz_reader.h"
+#include "src/sackli_reader.h"
 
-namespace bagz {
+namespace sackli {
 
-absl::StatusOr<BagzIndex> BagzIndex::Create(const BagzReader& reader) {
+absl::StatusOr<SackliIndex> SackliIndex::Create(const SackliReader& reader) {
   size_t num_records = reader.size();
   absl::StatusOr<std::vector<std::string>> records =
           reader.ReadRange(0, num_records);
@@ -38,7 +38,7 @@ absl::StatusOr<BagzIndex> BagzIndex::Create(const BagzReader& reader) {
   for (size_t i = 0; i < num_records; ++i) {
     index.emplace(std::move((*records)[i]), i);
   }
-  return BagzIndex(std::move(index));
+  return SackliIndex(std::move(index));
 }
 
-}  // namespace bagz
+}  // namespace sackli

@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef BAGZ_SRC_INTERNAL_SERIALIZE_H_
-#define BAGZ_SRC_INTERNAL_SERIALIZE_H_
+#ifndef SACKLI_SRC_INTERNAL_SERIALIZE_H_
+#define SACKLI_SRC_INTERNAL_SERIALIZE_H_
 
 #include <bit>
 #include <cstdint>
 
-namespace bagz::internal {
+namespace sackli::internal {
 
 // Converts to/from big-endian and little-endian when on big-endian machines.
 constexpr inline uint64_t SerializeUint64(uint64_t serialise) {
@@ -37,6 +37,6 @@ constexpr inline uint64_t SerializeUint64(uint64_t serialise) {
   }
 }
 
-}  // namespace bagz::internal
+}  // namespace sackli::internal
 
-#endif  // BAGZ_SRC_INTERNAL_SERIALIZE_H_
+#endif  // SACKLI_SRC_INTERNAL_SERIALIZE_H_

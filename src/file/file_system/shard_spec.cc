@@ -27,7 +27,7 @@
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
 
-namespace bagz {
+namespace sackli {
 
 namespace {
 
@@ -133,4 +133,4 @@ std::string CanonicaliseShardSpec(
   return std::string(shard_spec);
 }
 
-}  // namespace bagz
+}  // namespace sackli

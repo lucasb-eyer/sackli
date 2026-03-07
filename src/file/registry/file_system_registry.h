@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef BAGZ_SRC_FILE_REGISTRY_FILE_SYSTEM_REGISTRY_H_
-#define BAGZ_SRC_FILE_REGISTRY_FILE_SYSTEM_REGISTRY_H_
+#ifndef SACKLI_SRC_FILE_REGISTRY_FILE_SYSTEM_REGISTRY_H_
+#define SACKLI_SRC_FILE_REGISTRY_FILE_SYSTEM_REGISTRY_H_
 
 #include <string>
 
@@ -26,7 +26,7 @@
 #include "absl/synchronization/mutex.h"
 #include "src/file/file_system/file_system.h"
 
-namespace bagz {
+namespace sackli {
 
 // Result of resolving a filename_with_prefix to a file system and filename.
 struct ResolvedFile {
@@ -93,6 +93,6 @@ class FileSystemRegistry {
       ABSL_GUARDED_BY(mutex_);
 };
 
-}  // namespace bagz
+}  // namespace sackli
 
-#endif  // BAGZ_SRC_FILE_REGISTRY_FILE_SYSTEM_REGISTRY_H_
+#endif  // SACKLI_SRC_FILE_REGISTRY_FILE_SYSTEM_REGISTRY_H_

@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef BAGZ_SRC_FILE_FILE_SYSTEMS_POSIX_POSIX_FILE_SYSTEM_H_
-#define BAGZ_SRC_FILE_FILE_SYSTEMS_POSIX_POSIX_FILE_SYSTEM_H_
+#ifndef SACKLI_SRC_FILE_FILE_SYSTEMS_POSIX_POSIX_FILE_SYSTEM_H_
+#define SACKLI_SRC_FILE_FILE_SYSTEMS_POSIX_POSIX_FILE_SYSTEM_H_
 
 #include <sys/types.h>
 
@@ -29,7 +29,7 @@
 #include "src/file/file_system/pread_file.h"
 #include "src/file/file_system/write_file.h"
 
-namespace bagz {
+namespace sackli {
 
 // An implementation of FileSystem in terms of standard C++ and POSIX file
 // operations. Note that WriteFile and PReadFile uses POSIX operations.
@@ -51,6 +51,6 @@ class PosixFileSystem : public FileSystem {
                 absl::string_view options) const override;
 };
 
-}  // namespace bagz
+}  // namespace sackli
 
-#endif  // BAGZ_SRC_FILE_FILE_SYSTEMS_POSIX_POSIX_FILE_SYSTEM_H_
+#endif  // SACKLI_SRC_FILE_FILE_SYSTEMS_POSIX_POSIX_FILE_SYSTEM_H_

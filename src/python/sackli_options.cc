@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "src/python/bagz_options.h"
+#include "src/python/sackli_options.h"
 
 #include <string>
 
 #include "absl/strings/string_view.h"
-#include "src/bagz_options.h"
+#include "src/sackli_options.h"
 #include "pybind11/cast.h"
 #include "pybind11/gil.h"
 #include "pybind11/numpy.h"
@@ -25,7 +25,7 @@
 #include "pybind11/pytypes.h"
 #include "pybind11/stl.h"
 
-namespace bagz {
+namespace sackli {
 
 namespace {
 
@@ -45,7 +45,7 @@ the records in each shard are indexed. See README.md#sharding.)";
 
 }  // namespace
 
-void RegisterBagzOptions(py::module& m) {
+void RegisterSackliOptions(py::module& m) {
   py::enum_<LimitsPlacement>(
       m, "LimitsPlacement",
       "Whether limits are at the end of the file or in a separate file.")
@@ -90,4 +90,4 @@ void RegisterBagzOptions(py::module& m) {
              "Interleaved sharding");
 }
 
-}  // namespace bagz
+}  // namespace sackli

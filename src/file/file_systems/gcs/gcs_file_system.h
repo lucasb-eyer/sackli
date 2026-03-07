@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef BAGZ_SRC_FILE_FILE_SYSTEMS_GCS_GCS_FILE_SYSTEM_H_
-#define BAGZ_SRC_FILE_FILE_SYSTEMS_GCS_GCS_FILE_SYSTEM_H_
+#ifndef SACKLI_SRC_FILE_FILE_SYSTEMS_GCS_GCS_FILE_SYSTEM_H_
+#define SACKLI_SRC_FILE_FILE_SYSTEMS_GCS_GCS_FILE_SYSTEM_H_
 
 #include <cstdint>
 #include <memory>
@@ -29,7 +29,7 @@
 #include "src/file/file_system/write_file.h"
 #include "google/cloud/storage/client.h"
 
-namespace bagz {
+namespace sackli {
 
 // An implementation of FileSystem to read file in GCS. This uses the tensorflow
 // GCS filesystem library.
@@ -74,6 +74,6 @@ class GcsFileSystem : public FileSystem {
   ClientFactory client_factory_;
 };
 
-}  // namespace bagz
+}  // namespace sackli
 
-#endif  // BAGZ_SRC_FILE_FILE_SYSTEMS_GCS_GCS_FILE_SYSTEM_H_
+#endif  // SACKLI_SRC_FILE_FILE_SYSTEMS_GCS_GCS_FILE_SYSTEM_H_
