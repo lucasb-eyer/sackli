@@ -8,10 +8,14 @@ on:
   workflow_dispatch:
 
 jobs:
-  python-314t-posix:
+  python-posix:
     runs-on: ubuntu-22.04
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.13t", "3.14", "3.14t"]
     env:
       TEST_TMPDIR: ${{ github.workspace }}/test_tmpdir
     steps:
@@ -21,10 +25,11 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.14t"
+          python-version: ${{ matrix.python-version }}
           cache: pip
 
       - name: Verify free-threaded interpreter
+        if: endsWith(matrix.python-version, 't')
         run: |
           python - <<'PY'
           import sys
@@ -33,6 +38,18 @@ jobs:
           print(sys.version)
           print("Py_GIL_DISABLED =", sysconfig.get_config_var("Py_GIL_DISABLED"))
           assert sysconfig.get_config_var("Py_GIL_DISABLED") == 1
+          PY
+
+      - name: Verify regular interpreter
+        if: ${{ !endsWith(matrix.python-version, 't') }}
+        run: |
+          python - <<'PY'
+          import sys
+          import sysconfig
+
+          print(sys.version)
+          print("Py_GIL_DISABLED =", sysconfig.get_config_var("Py_GIL_DISABLED"))
+          assert sysconfig.get_config_var("Py_GIL_DISABLED") in (None, 0)
           PY
 
       - name: Install build and test dependencies
