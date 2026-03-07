@@ -12,73 +12,61 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from collections import Counter
 import os
+from pathlib import Path
 
-from absl.testing import absltest
-from absl.testing import parameterized
 import apache_beam as beam
 from apache_beam.testing import test_pipeline
 from apache_beam.testing import util
+import pytest
 
 from sackli.beam import sacklio
 import sackli
 
 
-class SackliioTest(parameterized.TestCase):
-
-  @parameterized.parameters(
-      'output@2.bagz',
-      'output@2.data.bagz',
-      'output@*.bagz',
-      'output.extra@2.bagz',
-      'output@2.bag',
-      'output.bag@0',
-  )
-  def test_write_to_bagz(self, file_path):
-    temp_dir = self.create_tempdir().full_path
-    name = os.path.join(temp_dir, file_path)
-    records = [b'a', b'b', b'c', b'd']
-
-    with test_pipeline.TestPipeline() as p:
-      _ = p | beam.Create(records) | sacklio.WriteToSackli(name)
-
-    # Verify the output
-    reader = sackli.Reader(name[:-2] if name.endswith('@0') else name)
-    self.assertCountEqual(reader.read(), records)
-
-  @parameterized.named_parameters(
-      ('no_extension', 'output.txt'),
-      ('no_sharding', 'output@2'),
-      ('bad_extension', 'output@2.bagzext'),
-  )
-  def test_write_to_sackli_invalid_paths(self, file_path):
-    with self.assertRaisesRegex(
-        ValueError, f'File path "{file_path}" must be in the form'
-    ):
-      sacklio.WriteToSackli(file_path)
-
-  @parameterized.parameters(
-      'output@2.bagz',
-      'output@2.data.bagz',
-      'output@*.bagz',
-      'output.extra@2.bagz',
-      'output@2.bag',
-      'output.bag@0',
-  )
-  def test_write_and_read(self, file_path):
-    temp_dir = self.create_tempdir().full_path
-    name = os.path.join(temp_dir, file_path)
-    records = [b'a', b'b', b'c', b'd']
-
-    with test_pipeline.TestPipeline() as p:
-      _ = p | beam.Create(records) | sacklio.WriteToSackli(name)
-
-    with test_pipeline.TestPipeline() as p:
-      read_records = p | sacklio.ReadFromSackli(
-          name[:-2] if name.endswith('@0') else name
-      )
-      util.assert_that(read_records, util.equal_to(records))
+_OUTPUT_PATHS = (
+    'output@2.bagz',
+    'output@2.data.bagz',
+    'output@*.bagz',
+    'output.extra@2.bagz',
+    'output@2.bag',
+    'output.bag@0',
+)
 
 
-if __name__ == '__main__':
-  absltest.main()
+@pytest.mark.parametrize('file_path', _OUTPUT_PATHS)
+def test_write_to_bagz(tmp_path: Path, file_path: str) -> None:
+  name = os.path.join(tmp_path, file_path)
+  records = [b'a', b'b', b'c', b'd']
+
+  with test_pipeline.TestPipeline() as p:
+    _ = p | beam.Create(records) | sacklio.WriteToSackli(name)
+
+  reader = sackli.Reader(name[:-2] if name.endswith('@0') else name)
+  assert Counter(reader.read()) == Counter(records)
+
+
+@pytest.mark.parametrize(
+    'file_path',
+    ('output.txt', 'output@2', 'output@2.bagzext'),
+    ids=('no_extension', 'no_sharding', 'bad_extension'),
+)
+def test_write_to_sackli_invalid_paths(file_path: str) -> None:
+  with pytest.raises(ValueError, match=f'File path "{file_path}" must be in the form'):
+    sacklio.WriteToSackli(file_path)
+
+
+@pytest.mark.parametrize('file_path', _OUTPUT_PATHS)
+def test_write_and_read(tmp_path: Path, file_path: str) -> None:
+  name = os.path.join(tmp_path, file_path)
+  records = [b'a', b'b', b'c', b'd']
+
+  with test_pipeline.TestPipeline() as p:
+    _ = p | beam.Create(records) | sacklio.WriteToSackli(name)
+
+  with test_pipeline.TestPipeline() as p:
+    read_records = p | sacklio.ReadFromSackli(
+        name[:-2] if name.endswith('@0') else name
+    )
+    util.assert_that(read_records, util.equal_to(records))

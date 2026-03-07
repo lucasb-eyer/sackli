@@ -51,7 +51,7 @@ build = "cp3*-manylinux_x86_64"
 build-frontend = "build[uv]"
 build-verbosity = 1
 test-command = "pytest {package}/src"
-test-requires = "pytest absl-py numpy"
+test-requires = "pytest numpy"
 
 [tool.cibuildwheel.environment]
 TEST_TMPDIR = "${PWD}/test_tmpdir"
