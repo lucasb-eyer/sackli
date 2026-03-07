@@ -16,6 +16,8 @@ cmake_minimum_required(VERSION 3.28)
 project(sackli LANGUAGES CXX)
 
 include(FetchContent)
+option(BUILD_TESTING "Build tests" OFF)
+include(CTest)
 
 option(SACKLI_ENABLE_GCS "Build Google Cloud Storage filesystem support" ON)
 option(SACKLI_ENABLE_S3 "Build Amazon S3 filesystem support" ON)
@@ -182,6 +184,7 @@ endif()
 
 file(GLOB sackli_core_sources "src/*.cc")
 file(GLOB sackli_core_headers "src/*.h")
+list(FILTER sackli_core_sources EXCLUDE REGEX "_test\\.cc$")
 
 sackli_cc_library(
   sackli_core
@@ -211,6 +214,27 @@ sackli_pybind11_extension(
     absl::strings
     sackli_core
 )
+
+if(BUILD_TESTING)
+  add_executable(
+    sackli_reader_test
+    src/sackli_reader_test.cc
+  )
+  target_include_directories(
+    sackli_reader_test
+    PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}"
+  )
+  target_link_libraries(
+    sackli_reader_test
+    PRIVATE
+      absl::status
+      absl::statusor
+      absl::strings
+      sackli_core
+  )
+  add_test(NAME sackli_reader_test COMMAND sackli_reader_test)
+endif()
 
 file(WRITE ${CMAKE_BINARY_DIR}/__init__.py [[# Copyright 2025 Google LLC
 #

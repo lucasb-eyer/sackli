@@ -15,6 +15,8 @@
 # Only build static version of zstd.
 set(ZSTD_BUILD_STATIC ON)
 set(ZSTD_BUILD_SHARED OFF)
+set(ZSTD_BUILD_PROGRAMS OFF CACHE BOOL "Disable zstd CLI targets in sackli builds" FORCE)
+set(ZSTD_BUILD_TESTS OFF CACHE BOOL "Disable zstd tests in sackli builds" FORCE)
 
 FetchContent_Declare(
   zstd

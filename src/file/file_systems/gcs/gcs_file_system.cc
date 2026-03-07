@@ -189,7 +189,8 @@ GcsFileSystem::OpenWrite(absl::string_view filename_without_prefix,
 
 absl::StatusOr<absl_nonnull std::unique_ptr<PReadFile>>
 GcsFileSystem::OpenPRead(absl::string_view filename_without_prefix,
-                         absl::string_view options) const {
+                         const PReadOpenOptions& options) const {
+  (void)options;
   const BucketObject bucket_object =
       BucketAndObjectName(filename_without_prefix);
   gcs::Client* absl_nonnull client = Client();
@@ -215,7 +216,8 @@ absl::Status GcsFileSystem::Delete(absl::string_view filename_without_prefix,
 
 absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>>
 GcsFileSystem::BulkOpenPRead(absl::string_view filespec_without_prefix,
-                             absl::string_view options) const {
+                             const PReadOpenOptions& options) const {
+  (void)options;
   std::vector<std::string> expanded_filespec =
       ExpandShardSpec(filespec_without_prefix);
 

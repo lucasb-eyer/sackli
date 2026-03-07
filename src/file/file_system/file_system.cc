@@ -38,7 +38,7 @@ constexpr int kMaxParallelism = 100;
 
 absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>>
 FileSystem::BulkOpenPRead(absl::string_view filespec_without_prefix,
-                          absl::string_view options) const {
+                          const PReadOpenOptions& options) const {
   std::vector<std::string> filenames = ExpandShardSpec(filespec_without_prefix);
   std::vector<std::unique_ptr<PReadFile>> files(filenames.size());
   if (absl::Status status = internal::ParallelDo(

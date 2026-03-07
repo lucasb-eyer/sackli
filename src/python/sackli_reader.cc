@@ -118,6 +118,10 @@ Args:
     cache the limits in memory.
   max_parallelism: Maximum number of threads to use for operations that can be
     parallelized.
+  access_pattern: Hint for how records are expected to be read from local
+    files.
+  cache_policy: Policy for how aggressively to retain record data in the local
+    page cache.
 )";
 
 constexpr char kInitDoc[] = R"(
@@ -505,12 +509,15 @@ void RegisterSackliReader(py::module& m) {
       .def(
           py::init([](ShardingLayout sharding_layout,
                       LimitsPlacement limits_placement, Compression compression,
-                      LimitsStorage limits_storage, int max_parallelism) {
+                      LimitsStorage limits_storage, int max_parallelism,
+                      AccessPattern access_pattern, CachePolicy cache_policy) {
             return SackliReader::Options{
                 .sharding_layout = sharding_layout,
                 .limits_placement = limits_placement,
                 .compression = compression,
                 .limits_storage = limits_storage,
+                .access_pattern = access_pattern,
+                .cache_policy = cache_policy,
                 .max_parallelism = max_parallelism,
             };
           }),
@@ -518,12 +525,16 @@ void RegisterSackliReader(py::module& m) {
           py::arg("limits_placement") = SackliReader::Options{}.limits_placement,
           py::arg("compression") = SackliReader::Options{}.compression,
           py::arg("limits_storage") = SackliReader::Options{}.limits_storage,
-          py::arg("max_parallelism") = SackliReader::Options{}.max_parallelism)
+          py::arg("max_parallelism") = SackliReader::Options{}.max_parallelism,
+          py::arg("access_pattern") = SackliReader::Options{}.access_pattern,
+          py::arg("cache_policy") = SackliReader::Options{}.cache_policy)
       .def_readwrite("sharding_layout", &SackliReader::Options::sharding_layout)
       .def_readwrite("limits_placement", &SackliReader::Options::limits_placement)
       .def_readwrite("compression", &SackliReader::Options::compression)
       .def_readwrite("limits_storage", &SackliReader::Options::limits_storage)
-      .def_readwrite("max_parallelism", &SackliReader::Options::max_parallelism);
+      .def_readwrite("max_parallelism", &SackliReader::Options::max_parallelism)
+      .def_readwrite("access_pattern", &SackliReader::Options::access_pattern)
+      .def_readwrite("cache_policy", &SackliReader::Options::cache_policy);
 
   reader
       .def(py::init(&Init), py::arg("file_spec"),

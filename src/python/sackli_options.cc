@@ -43,6 +43,12 @@ constexpr char kShardingLayoutEnumDoc[] = R"(
 When opening more than one shard for a bag, the shard type specifies how
 the records in each shard are indexed. See README.md#sharding.)";
 
+constexpr char kAccessPatternEnumDoc[] = R"(
+Hint for how records are expected to be read from local files.)";
+
+constexpr char kCachePolicyEnumDoc[] = R"(
+Policy for how aggressively to retain record data in the local page cache.)";
+
 }  // namespace
 
 void RegisterSackliOptions(py::module& m) {
@@ -88,6 +94,20 @@ void RegisterSackliOptions(py::module& m) {
              "Concatenated sharding")
       .value("INTERLEAVED", ShardingLayout::kInterleaved,
              "Interleaved sharding");
+
+  py::enum_<AccessPattern>(m, "AccessPattern", kAccessPatternEnumDoc + 1)
+      .value("SYSTEM", AccessPattern::kSystem,
+             "Use the system default access pattern")
+      .value("RANDOM", AccessPattern::kRandom,
+             "Reads are expected to be random")
+      .value("SEQUENTIAL", AccessPattern::kSequential,
+             "Reads are expected to be sequential");
+
+  py::enum_<CachePolicy>(m, "CachePolicy", kCachePolicyEnumDoc + 1)
+      .value("SYSTEM", CachePolicy::kSystem,
+             "Use the system default caching behavior")
+      .value("DROP_AFTER_READ", CachePolicy::kDropAfterRead,
+             "Drop record data from cache after it is read");
 }
 
 }  // namespace sackli

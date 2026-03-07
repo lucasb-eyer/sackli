@@ -23,6 +23,7 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
+#include "src/file/file_system/pread_open_options.h"
 #include "src/file/file_system/pread_file.h"
 #include "src/file/file_system/write_file.h"
 
@@ -38,10 +39,11 @@ class FileSystem {
   virtual ~FileSystem() = default;
 
   // Opens a file for reading. The error message does not need to include the
-  // filename or operation. `options` may be interpreted by the file-system.
+  // filename or operation. `options` are best-effort read hints that a
+  // file-system may honor or ignore.
   virtual absl::StatusOr<absl_nonnull std::unique_ptr<PReadFile>> OpenPRead(
       absl::string_view filename_without_prefix,
-      absl::string_view options) const = 0;
+      const PReadOpenOptions& options) const = 0;
 
   // Opens a file for writing. Errors do not need to include the filename or
   // operation. `offset` is the offset to start writing at. If the file does not
@@ -58,10 +60,20 @@ class FileSystem {
                               absl::string_view options) const = 0;
 
   // Opens a set of files for reading. See file_system/shard_spec.h for details
-  // on the filespec format.
+  // on the filespec format. `options` are best-effort read hints that a
+  // file-system may honor or ignore.
   virtual absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>>
   BulkOpenPRead(absl::string_view filespec_without_prefix,
-                absl::string_view options) const;
+                const PReadOpenOptions& options) const;
+
+  // Returns whether two read views with different options need distinct file
+  // handles for this filesystem. Filesystems that ignore read hints can return
+  // false.
+  virtual bool NeedsDistinctPReadHandles(
+      const PReadOpenOptions& first,
+      const PReadOpenOptions& second) const {
+    return false;
+  }
 };
 
 }  // namespace sackli

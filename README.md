@@ -4,6 +4,8 @@ This is a friendly fork of [bagz](https://github.com/google-deepmind/bagz).
 
 Additions so far:
 - Merge some PRs such as [S3 support PR by @KefanXIAO](https://github.com/google-deepmind/bagz/pull/5) and [compile fixes](https://github.com/google-deepmind/bagz/pull/4).
+- Add `access_pattern` and `cache_policy` reader hints:
+    - On POSIX filesystem, this can add `mmap` hints or use `pread` to optimize for random access and larger-than-RAM data.
 - Make it compatible to Python versions past 3.13.
 - Make it compatible with free-threading (nogil) Python.
 - Add CI, stress-tests and automatic wheel releases to PyPI.
@@ -166,10 +168,27 @@ with sackli.Writer(
     *   `sackli.LimitsStorage.ON_DISK`: Default - Reads limits from disk for each
         read.
     *   `sackli.LimitsStorage.IN_MEMORY`: Reads all limits from disk in one go.
+*   `access_pattern`: Can be one of:
+    *   `sackli.AccessPattern.SYSTEM`: Default - no specific hint to the OS.
+    *   `sackli.AccessPattern.RANDOM`: Hints that you read entries in random order.
+    *   `sackli.AccessPattern.SEQUENTIAL`: Hints that you read entries roughly sequentially.
+*   `cache_policy`: Can be one of:
+    *   `sackli.CachePolicy.SYSTEM`: Default - no specific hint to the OS.
+    *   `sackli.CachePolicy.DROP_AFTER_READ`: Reads data in such a way that the OS
+        is unlikely to hold any of it in cache. For POSIX filesystems, this means
+        using `pread` with specific flags. This is more efficient when you read
+        more data than your RAM before doing any repeats (ie epoch > RAM).
 *   `max_parallelism`: Default number of threads when reading many records.
 *   `sharding_layout`: Can be one of:
     *   `sackli.ShardingLayout.CONCATENATED`: Default - See [Sharding](#sharding)
     *   `sackli.ShardingLayout.INTERLEAVED`: See [Sharding](#sharding)
+
+`access_pattern` and `cache_policy` are currently interpreted only for local
+POSIX files and influence OS-level behaviour on page cache and cache lines.
+
+For tail-formatted files, `cache_policy=DROP_AFTER_READ` opens a second POSIX
+read handle to the same file so limits metadata reads keep the default cache
+policy.
 
 ### Writer Options
 

@@ -67,3 +67,15 @@ jobs:
 
       - name: Run Python tests
         run: python -m pytest -q src/python/sackli_test.py
+
+      - name: Configure C++ tests
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DSACKLI_ENABLE_GCS=OFF \
+            -DSACKLI_ENABLE_S3=OFF \
+            -DBUILD_TESTING=ON
+
+      - name: Build and run C++ tests
+        run: |
+          cmake --build build --parallel
+          ctest --test-dir build --output-on-failure

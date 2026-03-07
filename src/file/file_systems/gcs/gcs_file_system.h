@@ -25,6 +25,7 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 #include "src/file/file_system/file_system.h"
+#include "src/file/file_system/pread_open_options.h"
 #include "src/file/file_system/pread_file.h"
 #include "src/file/file_system/write_file.h"
 #include "google/cloud/storage/client.h"
@@ -45,7 +46,7 @@ class GcsFileSystem : public FileSystem {
   // the leading `gs:`.
   absl::StatusOr<absl_nonnull std::unique_ptr<PReadFile>> OpenPRead(
       absl::string_view filename_without_prefix,
-      absl::string_view options) const override;
+      const PReadOpenOptions& options) const override;
 
   // Open a GCS object for writing, starting at a given offset. After opening
   // the file, any data after that offset will be deleted.
@@ -67,7 +68,7 @@ class GcsFileSystem : public FileSystem {
   // the leading `gs:`.
   absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>>
   BulkOpenPRead(absl::string_view filespec_without_prefix,
-                absl::string_view options) const override;
+                const PReadOpenOptions& options) const override;
 
  private:
   google::cloud::storage::Client* absl_nonnull Client() const;

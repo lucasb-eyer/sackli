@@ -25,6 +25,7 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 #include "src/file/file_system/file_system.h"
+#include "src/file/file_system/pread_open_options.h"
 #include "src/file/file_system/pread_file.h"
 #include "src/file/file_system/write_file.h"
 #include <aws/s3/S3Client.h>
@@ -44,7 +45,7 @@ class S3FileSystem : public FileSystem {
   // the leading `s3:`.
   absl::StatusOr<absl_nonnull std::unique_ptr<PReadFile>> OpenPRead(
       absl::string_view filename_without_prefix,
-      absl::string_view options) const override;
+      const PReadOpenOptions& options) const override;
 
   // Open an S3 object for writing, starting at a given offset. After opening
   // the file, any data after that offset will be deleted.
@@ -66,7 +67,7 @@ class S3FileSystem : public FileSystem {
   // the leading `s3:`.
   absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>>
   BulkOpenPRead(absl::string_view filespec_without_prefix,
-                absl::string_view options) const override;
+                const PReadOpenOptions& options) const override;
 
  private:
   std::shared_ptr<Aws::S3::S3Client> Client() const;

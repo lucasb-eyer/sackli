@@ -85,20 +85,23 @@ absl::Status ReadIntoUint64(PReadFile& file, size_t offset,
   return status;
 }
 
-}  // namespace
-
-absl::StatusOr<RecordsLimits> SplitRecordsAndLimits(
-    std::unique_ptr<PReadFile> bag_content) {
-  std::shared_ptr<PReadFile> bag_content_shared = std::move(bag_content);
-  size_t bag_size = bag_content_shared->size();
+absl::StatusOr<RecordsLimits> BuildRecordsLimits(
+    std::shared_ptr<PReadFile> records_content,
+    std::shared_ptr<PReadFile> limits_content) {
+  const size_t bag_size = limits_content->size();
+  if (records_content->size() != bag_size) {
+    return absl::InvalidArgumentError(
+        "Record and limits files must have identical sizes when splitting "
+        "tail-formatted data.");
+  }
   if (bag_size < sizeof(uint64_t)) {
     if (bag_size != 0) {
       return absl::InvalidArgumentError(
           "Bad file format - invalid split point (non-empty but too small.)");
     } else {
       return RecordsLimits{
-          std::make_unique<OffsetPReadFileRef>(bag_content_shared, 0, 0),
-          std::make_unique<OffsetPReadFileRef>(std::move(bag_content_shared), 0,
+          std::make_unique<OffsetPReadFileRef>(records_content, 0, 0),
+          std::make_unique<OffsetPReadFileRef>(std::move(limits_content), 0,
                                                0)};
     }
   }
@@ -106,13 +109,13 @@ absl::StatusOr<RecordsLimits> SplitRecordsAndLimits(
   const uint64_t last_offset = bag_size - sizeof(uint64_t);
 
   // Read the last 8 bytes to find split point.
-  if (absl::Status status = ReadIntoUint64(*bag_content_shared, last_offset,
+  if (absl::Status status = ReadIntoUint64(*limits_content, last_offset,
                                            absl::MakeSpan(&records_end, 1));
       !status.ok()) {
     return status;
   }
 
-  // Check that the split point is within the bounds of the bag_content.
+  // Check that the split point is within the bounds of the bag content.
   // bag_size >= sizeof(uint64_t) is checked above.
   if (records_end > bag_size - sizeof(uint64_t)) {
     return absl::InvalidArgumentError(
@@ -127,9 +130,27 @@ absl::StatusOr<RecordsLimits> SplitRecordsAndLimits(
   }
 
   return RecordsLimits{
-      std::make_unique<OffsetPReadFileRef>(bag_content_shared, 0, records_end),
-      std::make_unique<OffsetPReadFileRef>(std::move(bag_content_shared),
+      std::make_unique<OffsetPReadFileRef>(records_content, 0, records_end),
+      std::make_unique<OffsetPReadFileRef>(std::move(limits_content),
                                            records_end, limits_size)};
+}
+
+}  // namespace
+
+absl::StatusOr<RecordsLimits> SplitRecordsAndLimits(
+    std::unique_ptr<PReadFile> bag_content) {
+  std::shared_ptr<PReadFile> bag_content_shared = std::move(bag_content);
+  return BuildRecordsLimits(bag_content_shared, bag_content_shared);
+}
+
+absl::StatusOr<RecordsLimits> SplitRecordsAndLimits(
+    std::unique_ptr<PReadFile> records_content,
+    std::unique_ptr<PReadFile> limits_content) {
+  std::shared_ptr<PReadFile> records_content_shared =
+      std::move(records_content);
+  std::shared_ptr<PReadFile> limits_content_shared = std::move(limits_content);
+  return BuildRecordsLimits(std::move(records_content_shared),
+                            std::move(limits_content_shared));
 }
 
 }  // namespace sackli::internal

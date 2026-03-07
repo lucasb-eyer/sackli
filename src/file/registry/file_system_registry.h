@@ -16,6 +16,7 @@
 #define SACKLI_SRC_FILE_REGISTRY_FILE_SYSTEM_REGISTRY_H_
 
 #include <string>
+#include <utility>
 
 #include "absl/base/nullability.h"
 #include "absl/base/thread_annotations.h"
@@ -27,6 +28,11 @@
 #include "src/file/file_system/file_system.h"
 
 namespace sackli {
+
+// Splits a filename into the file system prefix and filename using the same
+// rules as FileSystemRegistry::Resolve().
+std::pair<absl::string_view, absl::string_view> SplitPrefixAndFilename(
+    absl::string_view filename_with_prefix);
 
 // Result of resolving a filename_with_prefix to a file system and filename.
 struct ResolvedFile {

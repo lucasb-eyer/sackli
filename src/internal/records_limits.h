@@ -32,6 +32,12 @@ struct RecordsLimits {
 absl::StatusOr<RecordsLimits> SplitRecordsAndLimits(
     absl_nonnull std::unique_ptr<PReadFile> bag_content);
 
+// Splits a tail-formatted sackli using separate file handles for the record and
+// limits views. The handles must refer to the same underlying file content.
+absl::StatusOr<RecordsLimits> SplitRecordsAndLimits(
+    absl_nonnull std::unique_ptr<PReadFile> records_content,
+    absl_nonnull std::unique_ptr<PReadFile> limits_content);
+
 }  // namespace sackli::internal
 
 #endif  // SACKLI_SRC_INTERNAL_RECORDS_LIMITS_H_

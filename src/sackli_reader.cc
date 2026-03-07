@@ -17,6 +17,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <tuple>
@@ -26,17 +27,19 @@
 
 #include "absl/algorithm/container.h"
 #include "absl/base/call_once.h"
-#include "absl/base/nullability.h"
 #include "absl/functional/any_invocable.h"
 #include "absl/functional/function_ref.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/str_join.h"
+#include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
-#include "src/sackli_options.h"
 #include "src/file/file.h"
+#include "src/file/file_system/pread_open_options.h"
 #include "src/file/file_system/pread_file.h"
+#include "src/file/registry/file_system_registry.h"
 #include "src/internal/sackli_shard_reader.h"
 #include "src/internal/limits_name.h"
 #include "src/internal/parallel_do.h"
@@ -48,6 +51,250 @@
 
 namespace sackli {
 namespace {
+
+struct ReaderOpenHandles {
+  std::unique_ptr<PReadFile> records;
+  // For kSeparate this is the limits file; for kTail this may be an alternate
+  // view of the record file used to derive the limits view.
+  std::unique_ptr<PReadFile> limits_source;
+};
+
+using ReaderHandleBatch = std::vector<ReaderOpenHandles>;
+using ReaderFilePair =
+    std::pair<std::unique_ptr<PReadFile>, std::unique_ptr<PReadFile>>;
+
+PReadOpenOptions RecordFileOpenOptions(const SackliReader::Options& options) {
+  return PReadOpenOptions{
+      .access_pattern = options.access_pattern,
+      .cache_policy = options.cache_policy,
+      .prefer_streaming =
+          options.cache_policy == CachePolicy::kDropAfterRead,
+  };
+}
+
+PReadOpenOptions TailLimitSourceOpenOptions(
+    const SackliReader::Options& options) {
+  return PReadOpenOptions{
+      .access_pattern = options.access_pattern,
+  };
+}
+
+absl::StatusOr<bool> FileSpecNeedsSeparateTailLimitSourceHandle(
+    absl::string_view file_spec, const SackliReader::Options& options) {
+  const PReadOpenOptions record_options = RecordFileOpenOptions(options);
+  const PReadOpenOptions tail_limit_source_options =
+      TailLimitSourceOpenOptions(options);
+  if (record_options == tail_limit_source_options) {
+    return false;
+  }
+  absl::StatusOr<ResolvedFile> resolved_file =
+      FileSystemRegistry::Instance().Resolve(file_spec);
+  if (!resolved_file.ok()) {
+    return resolved_file.status();
+  }
+  return resolved_file->file_system->NeedsDistinctPReadHandles(
+      record_options, tail_limit_source_options);
+}
+
+std::string LimitsFileSpec(absl::string_view file_spec) {
+  const auto [prefix, filename] = SplitPrefixAndFilename(file_spec);
+  const std::string limits_name = internal::LimitsName(filename);
+  if (prefix.empty()) {
+    return limits_name;
+  }
+  return absl::StrCat(prefix, limits_name);
+}
+
+std::string LimitsFileSpecList(absl::Span<const std::string> file_specs) {
+  std::vector<std::string> limits_file_specs;
+  limits_file_specs.reserve(file_specs.size());
+  for (absl::string_view file_spec : file_specs) {
+    limits_file_specs.push_back(LimitsFileSpec(file_spec));
+  }
+  return absl::StrJoin(limits_file_specs, ",");
+}
+
+void AppendReaderHandleBatch(ReaderHandleBatch& destination,
+                             ReaderHandleBatch source) {
+  destination.reserve(destination.size() + source.size());
+  destination.insert(destination.end(), std::make_move_iterator(source.begin()),
+                     std::make_move_iterator(source.end()));
+}
+
+absl::StatusOr<ReaderHandleBatch> MakeReaderOpenHandles(
+    absl::Span<std::unique_ptr<PReadFile>> record_files,
+    absl::Span<std::unique_ptr<PReadFile>> limits_source_files) {
+  if (record_files.size() != limits_source_files.size()) {
+    return absl::InvalidArgumentError(
+        "record_files.size() must equal limits_source_files.size().");
+  }
+
+  ReaderHandleBatch handle_batch;
+  handle_batch.reserve(record_files.size());
+  for (size_t i = 0; i < record_files.size(); ++i) {
+    if (record_files[i] == nullptr) {
+      return absl::InternalError(
+          absl::StrCat("Record handle must be non-null at file ", i, "."));
+    }
+    handle_batch.push_back(ReaderOpenHandles{
+        .records = std::move(record_files[i]),
+        .limits_source = std::move(limits_source_files[i]),
+    });
+  }
+  return handle_batch;
+}
+
+absl::StatusOr<ReaderHandleBatch> OpenFilesForFileSpecBatch(
+    absl::Span<const std::string> file_specs,
+    bool use_separate_tail_limit_source_handles,
+    const SackliReader::Options& options) {
+  const std::string batch_file_spec = absl::StrJoin(file_specs, ",");
+  absl::StatusOr<std::vector<std::unique_ptr<PReadFile>>> record_files =
+      file::BulkOpenPRead(batch_file_spec, RecordFileOpenOptions(options));
+  if (!record_files.ok()) {
+    return record_files.status();
+  }
+
+  if (options.limits_placement == LimitsPlacement::kSeparate) {
+    absl::StatusOr<std::vector<std::unique_ptr<PReadFile>>> limits_files =
+        file::BulkOpenPRead(LimitsFileSpecList(file_specs));
+    if (!limits_files.ok()) {
+      return limits_files.status();
+    }
+    return MakeReaderOpenHandles(absl::MakeSpan(*record_files),
+                                 absl::MakeSpan(*limits_files));
+  }
+
+  std::vector<std::unique_ptr<PReadFile>> limits_source_files(
+      record_files->size());
+  if (use_separate_tail_limit_source_handles) {
+    absl::StatusOr<std::vector<std::unique_ptr<PReadFile>>>
+        opened_tail_limit_source_files = file::BulkOpenPRead(
+            batch_file_spec, TailLimitSourceOpenOptions(options));
+    if (!opened_tail_limit_source_files.ok()) {
+      return opened_tail_limit_source_files.status();
+    }
+    if (opened_tail_limit_source_files->size() != record_files->size()) {
+      return absl::InternalError(
+          "Tail limits source handles must match record handles.");
+    }
+    limits_source_files = std::move(*opened_tail_limit_source_files);
+  }
+  return MakeReaderOpenHandles(absl::MakeSpan(*record_files),
+                               absl::MakeSpan(limits_source_files));
+}
+
+absl::StatusOr<ReaderHandleBatch> OpenFilesForFileSpecList(
+    absl::string_view filespec, const SackliReader::Options& options) {
+  std::vector<std::string> file_specs;
+  for (absl::string_view file_spec :
+       absl::StrSplit(filespec, ',', absl::SkipEmpty())) {
+    file_specs.push_back(std::string(file_spec));
+  }
+
+  if (options.limits_placement != LimitsPlacement::kTail) {
+    return OpenFilesForFileSpecBatch(absl::MakeConstSpan(file_specs),
+                                     /*use_separate_tail_limit_source_handles=*/
+                                     false, options);
+  }
+
+  ReaderHandleBatch handle_batch;
+  std::vector<std::string> batch_file_specs;
+  bool batch_uses_separate_tail_limit_source_handles = false;
+
+  auto flush_batch = [&](bool use_separate_tail_limit_source_handles)
+      -> absl::StatusOr<ReaderHandleBatch> {
+    if (batch_file_specs.empty()) {
+      return ReaderHandleBatch{};
+    }
+    absl::StatusOr<ReaderHandleBatch> batch_handles = OpenFilesForFileSpecBatch(
+        absl::MakeConstSpan(batch_file_specs),
+        use_separate_tail_limit_source_handles, options);
+    batch_file_specs.clear();
+    return batch_handles;
+  };
+
+  for (const std::string& file_spec : file_specs) {
+    absl::StatusOr<bool> use_separate_tail_limit_source_handles =
+        FileSpecNeedsSeparateTailLimitSourceHandle(file_spec, options);
+    if (!use_separate_tail_limit_source_handles.ok()) {
+      return use_separate_tail_limit_source_handles.status();
+    }
+
+    if (!batch_file_specs.empty() &&
+        *use_separate_tail_limit_source_handles !=
+            batch_uses_separate_tail_limit_source_handles) {
+      absl::StatusOr<ReaderHandleBatch> batch_handles = flush_batch(
+          batch_uses_separate_tail_limit_source_handles);
+      if (!batch_handles.ok()) {
+        return batch_handles.status();
+      }
+      AppendReaderHandleBatch(handle_batch, std::move(*batch_handles));
+    }
+    if (batch_file_specs.empty()) {
+      batch_uses_separate_tail_limit_source_handles =
+          *use_separate_tail_limit_source_handles;
+    }
+    batch_file_specs.push_back(std::string(file_spec));
+  }
+
+  absl::StatusOr<ReaderHandleBatch> batch_handles =
+      flush_batch(batch_uses_separate_tail_limit_source_handles);
+  if (!batch_handles.ok()) {
+    return batch_handles.status();
+  }
+  AppendReaderHandleBatch(handle_batch, std::move(*batch_handles));
+  return handle_batch;
+}
+
+absl::StatusOr<std::vector<ReaderFilePair>> ResolveFilePairs(
+    ReaderHandleBatch open_handles, const SackliReader::Options& options) {
+  std::vector<ReaderFilePair> file_pairs;
+  if (options.limits_placement == LimitsPlacement::kSeparate) {
+    file_pairs.reserve(open_handles.size());
+    for (size_t i = 0; i < open_handles.size(); ++i) {
+      ReaderOpenHandles& handles = open_handles[i];
+      if (handles.records == nullptr || handles.limits_source == nullptr) {
+        return absl::InternalError(
+            absl::StrCat("Record and limits handles must be non-null at file ",
+                         i, "."));
+      }
+      file_pairs.push_back(
+          {std::move(handles.records), std::move(handles.limits_source)});
+    }
+    return file_pairs;
+  }
+
+  file_pairs.resize(open_handles.size());
+  if (absl::Status status = internal::ParallelDo(
+          open_handles.size(),
+          [&](size_t i) -> absl::Status {
+            ReaderOpenHandles& handles = open_handles[i];
+            if (handles.records == nullptr) {
+              return absl::InternalError(
+                  absl::StrCat("Record handle must be non-null at file ", i,
+                               "."));
+            }
+            absl::StatusOr<internal::RecordsLimits> split =
+                handles.limits_source != nullptr
+                    ? internal::SplitRecordsAndLimits(std::move(handles.records),
+                                                      std::move(handles.limits_source))
+                    : internal::SplitRecordsAndLimits(std::move(handles.records));
+            if (!split.ok()) {
+              return absl::Status(
+                  split.status().code(),
+                  absl::StrCat(split.status().message(), "; at file ", i));
+            }
+            file_pairs[i] = {std::move(split->records),
+                             std::move(split->limits)};
+            return absl::OkStatus();
+          },
+          options.max_parallelism, /*cpu_bound=*/false);
+      !status.ok()) {
+    return status;
+  }
+  return file_pairs;
+}
 
 // Reads the entire file into memory on first use the provided PReadFile
 // interface.
@@ -350,6 +597,45 @@ struct SackliReader::State {
   absl::AnyInvocable<internal::ZstdDecompressor() const> decompressor_factory_;
 };
 
+absl::StatusOr<SackliReader> SackliReader::BuildFromFilePairs(
+    std::vector<FilePair> file_pairs, SackliReader::Options options) {
+  std::vector<internal::SackliShardReader> shards;
+  shards.reserve(file_pairs.size());
+  size_t total_count = 0;
+  std::vector<size_t> accumulated_count;
+  accumulated_count.reserve(file_pairs.size());
+  for (auto& [record_file, limits_file] : file_pairs) {
+    if (options.limits_storage == LimitsStorage::kInMemory) {
+      limits_file = std::make_unique<InMemoryPReadFile>(std::move(limits_file));
+    }
+
+    internal::SackliShardReader& shard = shards.emplace_back(
+        std::move(record_file), std::move(limits_file));
+    total_count += shard.size();
+    accumulated_count.push_back(total_count);
+  }
+  if (options.sharding_layout == ShardingLayout::kInterleaved) {
+    for (size_t i = 1; i < shards.size(); ++i) {
+      if (shards[i].size() > shards[i - 1].size()) {
+        return absl::InvalidArgumentError(absl::StrCat(
+            "Interleaved error - shard sizes must be non-increasing. Size at ",
+            i, " : ", shards[i].size(), " size at", i - 1, " : ",
+            shards[i - 1].size()));
+      }
+      if (shards.front().size() - shards[i].size() > 1) {
+        return absl::InvalidArgumentError(absl::StrCat(
+            "Interleaved error - shard sizes must be within 1 of each other. "
+            "First size: ",
+            shards.front().size(), " size at ", i, " : ", shards[i].size()));
+      }
+    }
+  }
+  return SackliReader(
+      std::make_shared<SackliReader::State>(
+          std::move(options), std::move(shards), std::move(accumulated_count)),
+      /*slice_start=*/0, /*slice_step=*/1, /*slice_length=*/total_count);
+}
+
 size_t SackliReader::size() const { return slice_length_; }
 
 double SackliReader::ApproximateNumBytesPerRecord() const {
@@ -509,90 +795,6 @@ absl::Status SackliReader::ReadIndicesWithAllocator(
                                           copy_result);
 }
 
-absl::StatusOr<SackliReader> SackliReader::OpenFiles(
-    absl::Span<absl_nonnull std::unique_ptr<PReadFile>> record_files,
-    absl::Span<absl_nonnull std::unique_ptr<PReadFile>> limits_files,
-    Options options) {
-  if (std::holds_alternative<CompressionAutoDetect>(options.compression)) {
-    return absl::InvalidArgumentError(
-        "Compression must not be kAutoDetect when calling "
-        "SackliReader::OpenFiles().");
-  }
-
-  std::vector<std::unique_ptr<PReadFile>> limit_files_vector;
-  if (options.limits_placement == LimitsPlacement::kSeparate) {
-    if (record_files.size() != limits_files.size()) {
-      return absl::InvalidArgumentError(
-          "When LimitsPlacement::kSeparate, Then record_files.size() must "
-          "equal limits_files.size().");
-    }
-  } else {
-    if (!limits_files.empty()) {
-      return absl::InvalidArgumentError(
-          "When LimitsPlacement::kSeparate, Then limits_files.empty() must "
-          "be true.");
-    }
-    limit_files_vector.reserve(record_files.size());
-    for (std::size_t i = 0; i < record_files.size(); ++i) {
-      limit_files_vector.push_back(nullptr);
-    }
-    limits_files = absl::MakeSpan(limit_files_vector);
-    absl::Status status = internal::ParallelDo(
-        record_files.size(),
-        [&](size_t i) -> absl::Status {
-          absl::StatusOr<internal::RecordsLimits> split =
-              internal::SplitRecordsAndLimits(std::move(record_files[i]));
-          if (!split.ok()) {
-            return absl::Status(
-                split.status().code(),
-                absl::StrCat(split.status().message(), "; at file ", i));
-          }
-          record_files[i] = std::move(split->records);
-          limit_files_vector[i] = std::move(split->limits);
-          return absl::OkStatus();
-        },
-        options.max_parallelism, /*cpu_bound=*/false);
-
-    if (!status.ok()) {
-      return status;
-    }
-  }
-  std::vector<internal::SackliShardReader> shards;
-  size_t total_count = 0;
-  std::vector<size_t> accumulated_count;
-  for (size_t i = 0; i < record_files.size(); ++i) {
-    if (options.limits_storage == LimitsStorage::kInMemory) {
-      limits_files[i] =
-          std::make_unique<InMemoryPReadFile>(std::move(limits_files[i]));
-    }
-
-    internal::SackliShardReader& shard = shards.emplace_back(
-        std::move(record_files[i]), std::move(limits_files[i]));
-    total_count += shard.size();
-    accumulated_count.push_back(total_count);
-  }
-  if (options.sharding_layout == ShardingLayout::kInterleaved) {
-    for (size_t i = 1; i < shards.size(); ++i) {
-      if (shards[i].size() > shards[i - 1].size()) {
-        return absl::InvalidArgumentError(absl::StrCat(
-            "Interleaved error - shard sizes must be non-increasing. Size at ",
-            i, " : ", shards[i].size(), " size at", i - 1, " : ",
-            shards[i - 1].size()));
-      }
-      if (shards.front().size() - shards[i].size() > 1) {
-        return absl::InvalidArgumentError(absl::StrCat(
-            "Interleaved error - shard sizes must be within 1 of each other. "
-            "First size: ",
-            shards.front().size(), " size at ", i, " : ", shards[i].size()));
-      }
-    }
-  }
-  return SackliReader(
-      std::make_shared<State>(std::move(options), std::move(shards),
-                              std::move(accumulated_count)),
-      /*slice_start=*/0, /*slice_step=*/1, /*slice_length=*/total_count);
-}
-
 absl::StatusOr<SackliReader> SackliReader::Open(absl::string_view filespec,
                                             SackliReader::Options options) {
   if (std::holds_alternative<CompressionAutoDetect>(options.compression)) {
@@ -603,26 +805,17 @@ absl::StatusOr<SackliReader> SackliReader::Open(absl::string_view filespec,
     }
   }
 
-  absl::StatusOr<std::vector<std::unique_ptr<PReadFile>>> all_files;
-  absl::Span<std::unique_ptr<PReadFile>> record_files;
-  absl::Span<std::unique_ptr<PReadFile>> limits_files;
-  if (options.limits_placement == LimitsPlacement::kSeparate) {
-    all_files = file::BulkOpenPRead(
-        absl::StrCat(filespec, ",", internal::LimitsName(filespec)));
-    if (!all_files.ok()) {
-      return all_files.status();
-    }
-    size_t num_files = all_files->size() / 2;
-    record_files = absl::MakeSpan(*all_files).subspan(0, num_files);
-    limits_files = absl::MakeSpan(*all_files).subspan(num_files);
-  } else {
-    all_files = file::BulkOpenPRead(filespec);
-    if (!all_files.ok()) {
-      return all_files.status();
-    }
-    record_files = absl::MakeSpan(*all_files);
+  absl::StatusOr<ReaderHandleBatch> open_handles =
+      OpenFilesForFileSpecList(filespec, options);
+  if (!open_handles.ok()) {
+    return open_handles.status();
   }
-  return OpenFiles(record_files, limits_files, std::move(options));
+  absl::StatusOr<std::vector<ReaderFilePair>> file_pairs =
+      ResolveFilePairs(std::move(*open_handles), options);
+  if (!file_pairs.ok()) {
+    return file_pairs.status();
+  }
+  return BuildFromFilePairs(std::move(*file_pairs), std::move(options));
 }
 
 absl::StatusOr<SackliReader::Handle> SackliReader::ReadHandle(size_t index) const {

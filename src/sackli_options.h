@@ -19,6 +19,8 @@
 #include <string>
 #include <variant>
 
+#include "src/file/file_system/pread_open_options.h"
+
 namespace sackli {
 
 // Whether limits are at the end of the file or in a separate file. See

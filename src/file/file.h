@@ -35,6 +35,7 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
+#include "src/file/file_system/pread_open_options.h"
 #include "src/file/file_system/pread_file.h"
 #include "src/file/file_system/write_file.h"
 
@@ -42,9 +43,9 @@ namespace sackli::file {
 
 // Opens a file for parallel reading.
 //
-// `options` are passed to the underlying file system.
+// `options` are best-effort read hints for the underlying file system.
 absl::StatusOr<absl_nonnull std::unique_ptr<PReadFile>> OpenPRead(
-    absl::string_view filename_with_prefix, absl::string_view options = {});
+    absl::string_view filename_with_prefix, PReadOpenOptions options = {});
 
 // Opens a file for writing.  If the file does not exist, it will be created.
 // Otherwise the file will be truncated to zero length.
@@ -80,10 +81,10 @@ absl::Status Delete(absl::string_view filename_with_prefix,
 // See file_system/shard_spec.h for details on how file_spec is expanded.
 // Comma separated file_specs are allowed to have different prefixes.
 //
-// `options` are passed to the underlying file system.
+// `options` are best-effort read hints for the underlying file system.
 absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>>
 BulkOpenPRead(absl::string_view file_spec_with_prefix,
-              absl::string_view options = {});
+              PReadOpenOptions options = {});
 
 }  // namespace sackli::file
 

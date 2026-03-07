@@ -28,7 +28,6 @@
 #include "src/file/registry/register_file_systems.h"
 
 namespace sackli {
-namespace {
 
 absl::once_flag file_system_registry_once;
 
@@ -48,8 +47,6 @@ std::pair<absl::string_view, absl::string_view> SplitPrefixAndFilename(
   }
   return {prefix, filename.substr(pos + 1)};
 }
-
-}  // namespace
 
 FileSystemRegistry& FileSystemRegistry::Instance() {
   static absl::NoDestructor<FileSystemRegistry> instance;

@@ -14,6 +14,7 @@
 
 #include "src/file/file_systems/posix/posix_file_system.h"
 
+#include <algorithm>
 #include <fcntl.h>
 #include <glob.h>
 #include <sys/mman.h>
@@ -23,6 +24,7 @@
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
+#include <limits>
 #include <memory>
 #include <string>
 #include <utility>
@@ -37,11 +39,47 @@
 #include "absl/strings/string_view.h"
 #include "src/file/file_system/file_system.h"
 #include "src/file/file_system/pread_file.h"
+#include "src/file/file_system/pread_open_options.h"
 #include "src/file/file_system/shard_spec.h"
 #include "src/file/file_system/write_file.h"
 
 namespace sackli {
 namespace {
+
+class ScopedFd {
+ public:
+  ScopedFd() = default;
+  explicit ScopedFd(int fd) : fd_(fd) {}
+  ~ScopedFd() {
+    if (fd_ >= 0) {
+      close(fd_);
+    }
+  }
+
+  ScopedFd(const ScopedFd&) = delete;
+  ScopedFd& operator=(const ScopedFd&) = delete;
+
+  ScopedFd(ScopedFd&& other) noexcept : fd_(other.release()) {}
+  ScopedFd& operator=(ScopedFd&& other) noexcept {
+    if (this != &other) {
+      if (fd_ >= 0) {
+        close(fd_);
+      }
+      fd_ = other.release();
+    }
+    return *this;
+  }
+
+  int get() const { return fd_; }
+  int release() {
+    int fd = fd_;
+    fd_ = -1;
+    return fd;
+  }
+
+ private:
+  int fd_ = -1;
+};
 
 class MmapDeleter {
  public:
@@ -57,27 +95,45 @@ class MmapDeleter {
 
 using MmapUniquePtr = std::unique_ptr<void, MmapDeleter>;
 
-absl::StatusOr<MmapUniquePtr> MmapFile(const std::string& filename) {
+constexpr size_t kPReadChunkSize = 1 << 20;
+
+enum class PosixReadBackend {
+  kMmap,
+  kPRead,
+};
+
+PosixReadBackend SelectReadBackend(const PReadOpenOptions& options) {
+  return options.prefer_streaming ||
+                 options.cache_policy == CachePolicy::kDropAfterRead
+             ? PosixReadBackend::kPRead
+             : PosixReadBackend::kMmap;
+}
+
+absl::StatusOr<ScopedFd> OpenReadOnlyFd(const std::string& filename) {
   int fd = open(filename.c_str(), O_RDONLY);
   if (fd < 0) {
     return absl::ErrnoToStatus(errno, "open");
   }
+  return ScopedFd(fd);
+}
+
+absl::StatusOr<size_t> FileSize(int fd) {
   struct stat stat;
   if (fstat(fd, &stat) < 0) {
-    close(fd);
     return absl::ErrnoToStatus(errno, "fstat");
   }
+  return stat.st_size;
+}
 
+absl::StatusOr<MmapUniquePtr> MmapFile(int fd, size_t size) {
   // We cannot mmap an empty file but we can use an empty string_view.
-  if (stat.st_size == 0) {
-    close(fd);
+  if (size == 0) {
     return MmapUniquePtr(nullptr, MmapDeleter(0));
   }
 
-  void* records_mmap =
-      mmap(/*addr=*/nullptr, /*length=*/stat.st_size, /*prot=*/PROT_READ,
-           /*flags=*/MAP_SHARED, /*fd=*/fd, /*offset=*/0);
-  close(fd);
+  void* records_mmap = mmap(/*addr=*/nullptr, /*length=*/size,
+                            /*prot=*/PROT_READ, /*flags=*/MAP_SHARED,
+                            /*fd=*/fd, /*offset=*/0);
   if (records_mmap == MAP_FAILED) {
     // kNotFound is confusing for user for ENODEV.
     if (errno == ENODEV) {
@@ -86,12 +142,87 @@ absl::StatusOr<MmapUniquePtr> MmapFile(const std::string& filename) {
       return absl::ErrnoToStatus(errno, "mmap");
     }
   }
-  return MmapUniquePtr(records_mmap, MmapDeleter(stat.st_size));
+  return MmapUniquePtr(records_mmap, MmapDeleter(size));
 }
 
-class PosixPReadFile : public PReadFile {
+int MadviseAccessPattern(AccessPattern access_pattern) {
+  switch (access_pattern) {
+    case AccessPattern::kRandom:
+      return MADV_RANDOM;
+    case AccessPattern::kSequential:
+      return MADV_SEQUENTIAL;
+    case AccessPattern::kSystem:
+      return -1;
+  }
+  return -1;
+}
+
+int FadviseAccessPattern(AccessPattern access_pattern) {
+  switch (access_pattern) {
+    case AccessPattern::kRandom:
+      return POSIX_FADV_RANDOM;
+    case AccessPattern::kSequential:
+      return POSIX_FADV_SEQUENTIAL;
+    case AccessPattern::kSystem:
+      return -1;
+  }
+  return -1;
+}
+
+void ApplyMmapAccessPattern(void* data, size_t size,
+                            AccessPattern access_pattern) {
+  int advice = MadviseAccessPattern(access_pattern);
+  if (data == nullptr || size == 0 || advice < 0) {
+    return;
+  }
+  (void)madvise(data, size, advice);
+}
+
+void ApplyFdAccessPattern(int fd, AccessPattern access_pattern) {
+  int advice = FadviseAccessPattern(access_pattern);
+  if (advice < 0) {
+    return;
+  }
+  (void)posix_fadvise(fd, 0, 0, advice);
+}
+
+size_t PageSize() {
+  static const size_t page_size = []() {
+    long size = sysconf(_SC_PAGESIZE);
+    return size > 0 ? static_cast<size_t>(size) : size_t{4096};
+  }();
+  return page_size;
+}
+
+size_t AlignDown(size_t value, size_t alignment) {
+  return value - value % alignment;
+}
+
+size_t AlignUp(size_t value, size_t alignment) {
+  size_t remainder = value % alignment;
+  if (remainder == 0) {
+    return value;
+  }
+  return value + (alignment - remainder);
+}
+
+void DropFileCache(int fd, size_t file_size, size_t offset, size_t num_bytes) {
+  if (num_bytes == 0) {
+    return;
+  }
+  size_t page_size = PageSize();
+  size_t begin = AlignDown(offset, page_size);
+  size_t end = std::min(file_size, AlignUp(offset + num_bytes, page_size));
+  if (end <= begin) {
+    return;
+  }
+  (void)posix_fadvise(fd, static_cast<off_t>(begin),
+                      static_cast<off_t>(end - begin), POSIX_FADV_DONTNEED);
+}
+
+class PosixMmapPReadFile : public PReadFile {
  public:
-  explicit PosixPReadFile(MmapUniquePtr mmap) : mmap_(std::move(mmap)) {}
+  explicit PosixMmapPReadFile(MmapUniquePtr mmap) : mmap_(std::move(mmap)) {}
   size_t size() const override { return mmap_.get_deleter().mmap_size(); }
 
   absl::Status PRead(
@@ -101,6 +232,9 @@ class PosixPReadFile : public PReadFile {
     if (num_bytes > mmap_size || offset > mmap_size - num_bytes) {
       return absl::OutOfRangeError("Invalid read");
     }
+    if (num_bytes == 0) {
+      return absl::OkStatus();
+    }
     callback(absl::string_view(static_cast<const char*>(mmap_.get()) + offset,
                                num_bytes));
     return absl::OkStatus();
@@ -108,6 +242,66 @@ class PosixPReadFile : public PReadFile {
 
  private:
   MmapUniquePtr mmap_;
+};
+
+class PosixFdPReadFile : public PReadFile {
+ public:
+  PosixFdPReadFile(ScopedFd fd, size_t size, bool drop_after_read)
+      : fd_(std::move(fd)),
+        size_(size),
+        drop_after_read_(drop_after_read) {}
+
+  size_t size() const override { return size_; }
+
+  absl::Status PRead(
+      size_t offset, size_t num_bytes,
+      absl::FunctionRef<bool(absl::string_view)> callback) const override {
+    if (num_bytes > size_ || offset > size_ - num_bytes) {
+      return absl::OutOfRangeError("Invalid read");
+    }
+    if (num_bytes == 0) {
+      return absl::OkStatus();
+    }
+
+    const size_t buffer_size =
+        std::min({num_bytes, kPReadChunkSize,
+                  static_cast<size_t>(std::numeric_limits<ssize_t>::max())});
+    std::string buffer(buffer_size, '\0');
+    size_t total_read = 0;
+    while (total_read < num_bytes) {
+      size_t remaining = num_bytes - total_read;
+      size_t chunk_offset = offset + total_read;
+      size_t chunk_size = std::min(remaining, buffer.size());
+      ssize_t bytes_read;
+      do {
+        bytes_read = pread(fd_.get(), buffer.data(), chunk_size,
+                           static_cast<off_t>(chunk_offset));
+      } while (bytes_read < 0 && errno == EINTR);
+      if (bytes_read < 0) {
+        return absl::ErrnoToStatus(errno, "pread");
+      }
+      if (bytes_read == 0) {
+        return absl::OutOfRangeError("Invalid read");
+      }
+
+      const size_t chunk_bytes = static_cast<size_t>(bytes_read);
+      total_read += chunk_bytes;
+      const bool continue_reading =
+          callback(absl::string_view(buffer.data(), chunk_bytes));
+      if (drop_after_read_) {
+        DropFileCache(fd_.get(), size_, chunk_offset, chunk_bytes);
+      }
+      if (!continue_reading) {
+        return absl::OkStatus();
+      }
+    }
+    return absl::OkStatus();
+  }
+
+ private:
+  ScopedFd fd_;
+  size_t size_;
+  bool drop_after_read_;
 };
 
 class PosixWriteFile : public WriteFile {
@@ -180,13 +374,31 @@ PosixFileSystem::OpenWrite(absl::string_view filename, uint64_t offset,
 
 absl::StatusOr<absl_nonnull std::unique_ptr<PReadFile>>
 PosixFileSystem::OpenPRead(absl::string_view filename,
-                           absl::string_view options) const {
+                           const PReadOpenOptions& options) const {
   std::string filename_str(filename);
-  absl::StatusOr<MmapUniquePtr> mmap = MmapFile(filename_str.c_str());
+  absl::StatusOr<ScopedFd> fd = OpenReadOnlyFd(filename_str);
+  if (!fd.ok()) {
+    return fd.status();
+  }
+  absl::StatusOr<size_t> size = FileSize(fd->get());
+  if (!size.ok()) {
+    return size.status();
+  }
+
+  const bool drop_after_read =
+      options.cache_policy == CachePolicy::kDropAfterRead;
+  if (SelectReadBackend(options) == PosixReadBackend::kPRead) {
+    ApplyFdAccessPattern(fd->get(), options.access_pattern);
+    return std::make_unique<PosixFdPReadFile>(
+        *std::move(fd), *size, drop_after_read);
+  }
+
+  absl::StatusOr<MmapUniquePtr> mmap = MmapFile(fd->get(), *size);
   if (!mmap.ok()) {
     return mmap.status();
   }
-  return std::make_unique<PosixPReadFile>(*std::move(mmap));
+  ApplyMmapAccessPattern(mmap->get(), *size, options.access_pattern);
+  return std::make_unique<PosixMmapPReadFile>(*std::move(mmap));
 }
 
 absl::Status PosixFileSystem::Delete(absl::string_view filename,
@@ -200,7 +412,7 @@ absl::Status PosixFileSystem::Delete(absl::string_view filename,
 
 absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>>
 PosixFileSystem::BulkOpenPRead(absl::string_view filespec_without_prefix,
-                               absl::string_view options) const {
+                               const PReadOpenOptions& options) const {
   std::string filespec = CanonicaliseShardSpec(
       filespec_without_prefix, [](const std::string& pattern) {
         glob_t glob_result;
@@ -214,6 +426,13 @@ PosixFileSystem::BulkOpenPRead(absl::string_view filespec_without_prefix,
       });
 
   return FileSystem::BulkOpenPRead(filespec, options);
+}
+
+bool PosixFileSystem::NeedsDistinctPReadHandles(
+    const PReadOpenOptions& first, const PReadOpenOptions& second) const {
+  return SelectReadBackend(first) != SelectReadBackend(second) ||
+         first.access_pattern != second.access_pattern ||
+         first.cache_policy != second.cache_policy;
 }
 
 }  // namespace sackli

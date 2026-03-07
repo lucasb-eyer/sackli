@@ -46,7 +46,7 @@ absl::Status Error(const absl::Status& status, absl::string_view operation,
 }  // namespace
 
 absl::StatusOr<std::unique_ptr<PReadFile>> OpenPRead(
-    absl::string_view filename_with_prefix, absl::string_view options) {
+    absl::string_view filename_with_prefix, PReadOpenOptions options) {
   absl::StatusOr<ResolvedFile> resolved_file =
       FileSystemRegistry::Instance().Resolve(filename_with_prefix);
   if (!resolved_file.ok()) {
@@ -107,7 +107,7 @@ absl::Status Delete(absl::string_view filename_with_prefix,
 
 absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>>
 BulkOpenPRead(absl::string_view file_spec_with_prefix,
-              absl::string_view options) {
+              PReadOpenOptions options) {
   // Group files by prefix. Only groups files with contiguous prefixes. To
   // save book keeping.
   std::vector<std::pair<FileSystem*, std::vector<absl::string_view>>>

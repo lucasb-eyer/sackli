@@ -26,7 +26,6 @@
 #include <utility>
 #include <vector>
 
-#include "absl/base/nullability.h"
 #include "absl/functional/function_ref.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -58,6 +57,12 @@ class SackliReader {
     // limits in memory.
     LimitsStorage limits_storage = LimitsStorage::kOnDisk;
 
+    // Hint for how records are expected to be read from local files.
+    AccessPattern access_pattern = AccessPattern::kSystem;
+
+    // Policy for how aggressively to retain record data in the page cache.
+    CachePolicy cache_policy = CachePolicy::kSystem;
+
     // Maximum number of parallel operations. Creates an executor with this
     // many threads/fibers.
     int max_parallelism = 100;
@@ -73,23 +78,6 @@ class SackliReader {
     uint64_t offset;
     uint64_t num_bytes;
   };
-
-  // Opens collection of Sackli-formatted shards using existing PReadFiles.
-  //
-  // The `options` parameter contains the opening options as described above.
-  //
-  // Constraints:
-  //   `options.compression` must not be `AutoDetect{}`.
-  //
-  //   If `limits_placement == kSeparate` then `limits_files` must have the same
-  //   size as `record_files`, otherwise it must be empty.
-  //
-  // An error is returned if the files are not in the correct format or if the
-  // constraints are not met.
-  static absl::StatusOr<SackliReader> OpenFiles(
-      absl::Span<absl_nonnull std::unique_ptr<PReadFile>> record_files,
-      absl::Span<absl_nonnull std::unique_ptr<PReadFile>> limits_files,
-      Options options);
 
   // Opens a collection of Sackli-formatted files (shards).
   //
@@ -222,7 +210,11 @@ class SackliReader {
   SackliReader& operator=(SackliReader&&) = default;
 
  private:
+  using FilePair =
+      std::pair<std::unique_ptr<PReadFile>, std::unique_ptr<PReadFile>>;
   struct State;
+  static absl::StatusOr<SackliReader> BuildFromFilePairs(
+      std::vector<FilePair> file_pairs, Options options);
   SackliReader(std::shared_ptr<const State> state, size_t slice_start,
              int64_t slice_step, size_t slice_length)
       : state_(std::move(state)),

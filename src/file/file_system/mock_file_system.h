@@ -32,6 +32,7 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 #include "src/file/file_system/file_system.h"
+#include "src/file/file_system/pread_open_options.h"
 #include "src/file/file_system/pread_file.h"
 #include "src/file/file_system/string_pread_file.h"
 #include "src/file/file_system/write_file.h"
@@ -149,7 +150,7 @@ class MockFileSystem : public FileSystem {
   MOCK_METHOD(absl::StatusOr<absl_nonnull std::unique_ptr<PReadFile>>,
               OpenPRead,
               (absl::string_view filename_without_prefix,
-               absl::string_view options),
+               const PReadOpenOptions& options),
               (const, override));
 
   // Mock method for `OpenWrite`.
@@ -177,7 +178,8 @@ class MockFileSystem : public FileSystem {
   MOCK_METHOD(
       absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>>,
       BulkOpenPRead,
-      (absl::string_view filespec_without_prefix, absl::string_view options),
+      (absl::string_view filespec_without_prefix,
+       const PReadOpenOptions& options),
       (const, override));
 };
 
