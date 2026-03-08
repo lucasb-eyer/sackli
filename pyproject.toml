@@ -46,9 +46,9 @@ cmake.args = ["-Wno-dev"]
 [tool.setuptools_scm]
 
 [tool.cibuildwheel]
-# We need openssl3, which is only available in newer versions of the build
-# image.
-manylinux-x86_64-image = "quay.io/pypa/manylinux_2_28_x86_64:2024.12.16-1"
+# Keep the 2_28 baseline for openssl3, but let cibuildwheel pick a current
+# official image so new Python interpreters (for example 3.14) are available.
+manylinux-x86_64-image = "manylinux_2_28"
 build = "cp3*-manylinux_x86_64"
 build-frontend = "build[uv]"
 build-verbosity = 1

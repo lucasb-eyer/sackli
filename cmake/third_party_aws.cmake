@@ -25,10 +25,18 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "")
 FetchContent_Declare(
   aws-sdk-cpp
   GIT_REPOSITORY https://github.com/aws/aws-sdk-cpp.git
-  GIT_TAG 1.11.400 # Latest stable version
+  GIT_TAG 1.11.400 # v1.11.400
   GIT_SHALLOW TRUE
   EXCLUDE_FROM_ALL
 )
+
+# aws-sdk-cpp 1.11.x vendors aws-crt-cpp with an older
+# cmake_minimum_required(VERSION) that CMake 4 rejects unless a minimum policy
+# version is provided for the third-party subproject.
+if(NOT DEFINED CMAKE_POLICY_VERSION_MINIMUM OR
+   CMAKE_POLICY_VERSION_MINIMUM VERSION_LESS 3.5)
+  set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+endif()
 
 FetchContent_MakeAvailable(aws-sdk-cpp)
 
