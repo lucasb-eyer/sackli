@@ -213,83 +213,6 @@ cache policy.
     *   `sackli.LimitsPlacement.TAIL`: Default - Writes limits to a tail of file.
     *   `sackli.LimitsPlacement.SEPARATE`: Writes limits to a separate file.
 
-## Apache Beam Support
-
-Säckli also provides Apache Beam connectors for reading and writing Säckli files in
-Beam pipelines.
-
-Ensure you have Apache Beam installed.
-```sh
-uv pip install apache_beam
-```
-
-### Säckli Source
-
-```python
-import apache_beam as beam
-from sackli.beam import sacklio
-import tensorflow as tf
-
-with beam.Pipeline() as pipeline:
-  examples = (
-      pipeline
-      | 'ReadData' >> sacklio.ReadFromSackli('/path/to/your/data@*.bagz')
-      | 'Decode' >> beam.Map(tf.train.Example.FromString)
-  )
-  # Continue your pipeline.
-```
-
-#### Säckli Sink
-
-```python
-from sackli.beam import sacklio
-import tensorflow as tf
-
-def create_tf_example(data):
-  # Replace with your actual feature creation logic.
-  feature = {
-      'data': tf.train.Feature(bytes_list=tf.train.BytesList(value=[data])),
-  }
-  return tf.train.Example(features=tf.train.Features(feature=feature))
-
-with beam.Pipeline() as pipeline:
-  data = [b'record1', b'record2', b'record3']
-
-  examples = (
-      pipeline
-      | 'CreateData' >> beam.Create(data)
-      | 'Encode' >> beam.Map(lambda x: create_tf_example(x).SerializeToString())
-      | 'WriteData' >> sacklio.WriteToSackli('/path/to/output/data@*.bagz')
-  )
-```
-
-## GCS Support
-
-Säckli supports Posix file-systems and Google Cloud Storage (GCS). If you have
-files on GCS you can access them with using the prefix `/gs:` to the path. These
-examples assume you have gcloud CLI installed.
-
-From the shell:
-
-```sh
-gcloud config set project your-project-name
-gcloud auth application-default login
-```
-
-Then use the 'gs:' file-system prefix.
-
-```python
-import pathlib
-import sackli
-
-# (This may freeze if you have not configured the project.)
-reader = sackli.Reader('gs://your-bucket-name/your-file.bagz')
-
-# Path supports a leading slash to work well with pathlib.
-bucket = pathlib.Path('/gs://your-bucket-name')
-reader = sackli.Reader(bucket / 'your-file.bagz')
-```
-
 ## Sharding
 
 An ordered collection of Säckli-formatted files ("shards") may be opened together
@@ -362,9 +285,106 @@ and indexed via a single `global-index`. The `global-index` is mapped to a
     `15`           | `00000-of-00003` | `5`
     `16`           | `00001-of-00003` | `5`
 
-## Säckli file format
+## Apache Beam Support
 
-The Säckli file format has two parts: the `records` section and the `limits`
+Säckli also provides Apache Beam connectors for reading and writing Säckli files in
+Beam pipelines.
+
+Ensure you have Apache Beam installed.
+```sh
+uv pip install apache_beam
+```
+
+### Säckli Source
+
+```python
+import apache_beam as beam
+from sackli.beam import sacklio
+import tensorflow as tf
+
+with beam.Pipeline() as pipeline:
+  examples = (
+      pipeline
+      | 'ReadData' >> sacklio.ReadFromSackli('/path/to/your/data@*.bagz')
+      | 'Decode' >> beam.Map(tf.train.Example.FromString)
+  )
+  # Continue your pipeline.
+```
+
+#### Säckli Sink
+
+```python
+from sackli.beam import sacklio
+import tensorflow as tf
+
+def create_tf_example(data):
+  # Replace with your actual feature creation logic.
+  feature = {
+      'data': tf.train.Feature(bytes_list=tf.train.BytesList(value=[data])),
+  }
+  return tf.train.Example(features=tf.train.Features(feature=feature))
+
+with beam.Pipeline() as pipeline:
+  data = [b'record1', b'record2', b'record3']
+
+  examples = (
+      pipeline
+      | 'CreateData' >> beam.Create(data)
+      | 'Encode' >> beam.Map(lambda x: create_tf_example(x).SerializeToString())
+      | 'WriteData' >> sacklio.WriteToSackli('/path/to/output/data@*.bagz')
+  )
+```
+
+## Cloud Storage
+
+Säckli supports POSIX file-systems, Google Cloud Storage (GCS), and Amazon S3.
+These can be enabled or disabled at compile-time, but the PyPI-deployed wheels
+have support for both built-in.
+
+### GCS authentication
+
+These examples assume you have the gcloud CLI installed.
+
+```sh
+gcloud config set project your-project-name
+gcloud auth application-default login
+```
+
+### S3 authentication
+
+Authentication uses the standard AWS credential chain (environment variables,
+`~/.aws/credentials`, IAM roles, etc.).
+
+```sh
+aws configure
+```
+
+### Paths
+
+Use the `gs:` and `s3:` file-system prefixes in paths.
+
+```python
+import pathlib
+import sackli
+
+# This may freeze if you have not configured the GCS project.
+gcs_reader = sackli.Reader('gs://your-bucket-name/your-file.bagz')
+s3_reader = sackli.Reader('s3://your-bucket-name/your-file.bagz')
+
+# Path supports a leading slash to work well with pathlib.
+gcs_bucket = pathlib.Path('/gs://your-bucket-name')
+gcs_reader = sackli.Reader(gcs_bucket / 'your-file.bagz')
+
+s3_bucket = pathlib.Path('/s3://your-bucket-name')
+s3_reader = sackli.Reader(s3_bucket / 'your-file.bagz')
+```
+
+## Säckli/Bagz file format
+
+For now, Säckli still preserves exactly the Bagz file format.
+However, this is not guaranteed to remain the case.
+
+The Bagz file format has two parts: the `records` section and the `limits`
 section.
 
 *   The `records` section consists of the concatenation of all (possibly
@@ -373,13 +393,13 @@ section.
 *   The `limits` section is a dense array of the end-offsets of each record in
     order, encoded in little-endian 64-bit unsigned integers.
 
-These can be stored with *tail-limits* in one file, where the `limits` sections
-is appended to the `record` section or *separate-limits* where they are stored
-in separate files.
+These can be stored as *tail-limits* in one file, where the `limits` section is
+appended to the `records` section, or as *separate-limits*, where they are
+stored in separate files.
 
 ### Tail-limits example
 
-Given Säckli file formatted file with the following 3 uncompressed records:
+Given a Bagz-formatted file with the following 3 uncompressed records:
 
 Records  |
 -------- |
@@ -387,7 +407,7 @@ Records  |
 `123`    |
 `catcat` |
 
-The raw bytes of the Säckli file formated file corresponding to the records above:
+The raw bytes of the Bagz-formatted file corresponding to the records above:
 
 ```
 0x61 a 0x62 b 0x63 c 0x64 d 0x65 e 0x66 f
