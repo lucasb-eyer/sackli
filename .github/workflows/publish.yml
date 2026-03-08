@@ -6,7 +6,8 @@ on:
       - "v*"
 
 jobs:
-  build:
+  build-sdist:
+    name: build-sdist
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
@@ -22,26 +23,46 @@ jobs:
           python -m pip install --upgrade pip build
           python -m build --sdist --outdir dist
 
-      - name: Build wheels
+      - name: Upload sdist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-sdist
+          path: dist/*
+
+  build-wheels:
+    name: build-wheel (${{ matrix.build }})
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        build:
+          - cp313-manylinux_x86_64
+          - cp313t-manylinux_x86_64
+          - cp314-manylinux_x86_64
+          - cp314t-manylinux_x86_64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build wheel
         uses: pypa/cibuildwheel@v3.4.0
         with:
           output-dir: dist
         env:
           CIBW_ENABLE: cpython-freethreading
-          CIBW_BUILD: >-
-            cp313-manylinux_x86_64
-            cp313t-manylinux_x86_64
-            cp314-manylinux_x86_64
-            cp314t-manylinux_x86_64
+          CIBW_BUILD: ${{ matrix.build }}
 
-      - name: Upload artifacts
+      - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dist
+          name: dist-${{ matrix.build }}
           path: dist/*
 
   publish:
-    needs: build
+    name: publish
+    needs:
+      - build-sdist
+      - build-wheels
     runs-on: ubuntu-22.04
     permissions:
       id-token: write
@@ -51,8 +72,9 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          name: dist
+          pattern: dist-*
           path: dist
+          merge-multiple: true
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
