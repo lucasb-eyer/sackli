@@ -24,10 +24,12 @@ enum class AccessPattern {
   kSequential,  // Reads are expected to be sequential.
 };
 
-// Policy for how aggressively to retain read data in caches.
+// Policy for how aggressively to retain or avoid read data in caches.
 enum class CachePolicy {
   kSystem,         // Use the system default caching behavior.
   kDropAfterRead,  // Best-effort hint to avoid retaining data after reads.
+  kDirectIo,       // Use direct I/O reads and avoid the page cache when
+                   // possible.
 };
 
 // Generic hints for opening a file for parallel reads. Filesystems may ignore

@@ -6,6 +6,7 @@ Additions so far:
 - Merge some PRs such as [S3 support PR by @KefanXIAO](https://github.com/google-deepmind/bagz/pull/5) and [compile fixes](https://github.com/google-deepmind/bagz/pull/4).
 - Add `access_pattern` and `cache_policy` reader hints:
     - On POSIX filesystem, this can add `mmap` hints or use `pread` to optimize for random access and larger-than-RAM data.
+    - On Linux, support `O_DIRECT` for even better reading of random access and larger-than-RAM data.
 - Make it compatible to Python versions past 3.13.
 - Make it compatible with free-threading (nogil) Python.
 - Add CI, stress-tests and automatic wheel releases to PyPI.
@@ -178,6 +179,14 @@ with sackli.Writer(
         is unlikely to hold any of it in cache. For POSIX filesystems, this means
         using `pread` with specific flags. This is more efficient when you read
         more data than your RAM before doing any repeats (ie epoch > RAM).
+    *   `sackli.CachePolicy.DIRECT_IO`: Uses Linux `O_DIRECT` for record reads.
+        This is the most direct reading option where the OS doesn't try anything,
+        no page caches, no readaheads, nothing. Can be the best options for random
+        reads on huge data with rare re-reads. Not all file-systems support this.
+        Uses `STATX_DIOALIGN` if supported, otherwise probes from a
+        conservative page-aligned starting point derived from
+        file/filesystem metadata. For the unaligned tail of the bagz file,
+        does a one-time standard read at init.
 *   `max_parallelism`: Default number of threads when reading many records.
 *   `sharding_layout`: Can be one of:
     *   `sackli.ShardingLayout.CONCATENATED`: Default - See [Sharding](#sharding)
@@ -186,9 +195,9 @@ with sackli.Writer(
 `access_pattern` and `cache_policy` are currently interpreted only for local
 POSIX files and influence OS-level behaviour on page cache and cache lines.
 
-For tail-formatted files, `cache_policy=DROP_AFTER_READ` opens a second POSIX
-read handle to the same file so limits metadata reads keep the default cache
-policy.
+For tail-formatted files, non-default POSIX record-cache policies open a second
+POSIX read handle to the same file so limits metadata reads keep the default
+cache policy.
 
 ### Writer Options
 

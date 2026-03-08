@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -28,6 +29,7 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/match.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "src/file/file.h"
@@ -52,10 +54,13 @@ struct TempFile {
   std::string path;
 };
 
-TempFile MakeTempFile(absl::string_view stem) {
+std::string MakeTempPath(absl::string_view stem) {
   static int next_id = 0;
-  return TempFile{
-      .path = absl::StrCat("/tmp/", stem, "-", getpid(), "-", next_id++)};
+  return absl::StrCat("/tmp/", stem, "-", getpid(), "-", next_id++);
+}
+
+TempFile MakeTempFile(absl::string_view stem) {
+  return TempFile{.path = MakeTempPath(stem)};
 }
 
 absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>>
@@ -170,6 +175,64 @@ bool ExpectCalls(absl::Span<const Call> actual, absl::Span<const Call> expected,
   return true;
 }
 
+bool IsDirectIoUnsupported(const absl::Status& status) {
+  return (status.code() == absl::StatusCode::kFailedPrecondition ||
+          status.code() == absl::StatusCode::kInvalidArgument ||
+          status.code() == absl::StatusCode::kPermissionDenied ||
+          status.code() == absl::StatusCode::kUnimplemented) &&
+         (absl::StrContains(status.message(), "Direct I/O") ||
+          absl::StrContains(status.message(), "O_DIRECT") ||
+          absl::StrContains(status.message(), "STATX_DIOALIGN"));
+}
+
+std::string MakePatternPayload(size_t size) {
+  std::string payload;
+  payload.reserve(size);
+  for (size_t i = 0; i < size; ++i) {
+    payload.push_back(static_cast<char>('a' + (i % 26)));
+  }
+  return payload;
+}
+
+bool WritePayload(const TempFile& temp_file, absl::string_view payload,
+                  absl::string_view test_name) {
+  absl::StatusOr<absl_nonnull std::unique_ptr<WriteFile>> writer =
+      file::OpenWrite(temp_file.path);
+  if (!Expect(writer.ok(),
+              absl::StrCat(test_name, ": failed to open writer: ",
+                           writer.status().message()))) {
+    return false;
+  }
+  if (!Expect((*writer)->Write(payload).ok(),
+              absl::StrCat(test_name, ": failed to write payload"))) {
+    return false;
+  }
+  return Expect((*writer)->Close().ok(),
+                absl::StrCat(test_name, ": failed to close writer"));
+}
+
+void AppendLittleEndianUint64(std::string& output, uint64_t value) {
+  for (int shift = 0; shift < 64; shift += 8) {
+    output.push_back(static_cast<char>((value >> shift) & 0xff));
+  }
+}
+
+std::string MakeTailBag(absl::Span<const absl::string_view> records) {
+  std::string bag;
+  std::vector<uint64_t> limits;
+  limits.reserve(records.size());
+  uint64_t offset = 0;
+  for (absl::string_view record : records) {
+    bag.append(record.data(), record.size());
+    offset += record.size();
+    limits.push_back(offset);
+  }
+  for (uint64_t limit : limits) {
+    AppendLittleEndianUint64(bag, limit);
+  }
+  return bag;
+}
+
 bool TestTailUsesSeparateLimitHandlesForPosixFiles() {
   RecordingPosixFileSystem file_system;
   SackliReader::Options options{
@@ -194,6 +257,32 @@ bool TestTailUsesSeparateLimitHandlesForPosixFiles() {
        .options = {.access_pattern = AccessPattern::kRandom}},
   };
   return ExpectCalls(file_system.calls, expected, "tail-posix");
+}
+
+bool TestTailUsesSeparateLimitHandlesForDirectIoPosixFiles() {
+  RecordingPosixFileSystem file_system;
+  SackliReader::Options options{
+      .limits_placement = LimitsPlacement::kTail,
+      .compression = CompressionNone{},
+      .access_pattern = AccessPattern::kRandom,
+      .cache_policy = CachePolicy::kDirectIo,
+  };
+  absl::StatusOr<SackliReader> reader =
+      SackliReader::Open("record_posix:data.bagz", std::move(options));
+  if (!Expect(reader.ok(),
+              absl::StrCat("tail-posix-direct: ",
+                           reader.status().message()))) {
+    return false;
+  }
+  const Call expected[] = {
+      {.filespec = "data.bagz",
+       .options =
+           {.access_pattern = AccessPattern::kRandom,
+            .cache_policy = CachePolicy::kDirectIo}},
+      {.filespec = "data.bagz",
+       .options = {.access_pattern = AccessPattern::kRandom}},
+  };
+  return ExpectCalls(file_system.calls, expected, "tail-posix-direct");
 }
 
 bool TestTailReusesRecordHandleForAccessPatternOnly() {
@@ -449,10 +538,238 @@ bool TestPosixPReadBackendStreamsLargeReads() {
                 "pread-stream: expected early stop after first chunk");
 }
 
+bool TestPosixDirectBackendReadsLargeReadsIfSupported() {
+  constexpr size_t kPayloadSize = (2 << 20) + 123;
+  constexpr size_t kSliceOffset = 37;
+  constexpr size_t kSliceLength = (2 << 20) + 19;
+  TempFile temp_file = MakeTempFile("sackli-posix-direct-read");
+
+  const std::string payload = MakePatternPayload(kPayloadSize);
+  if (!WritePayload(temp_file, payload, "direct-read")) {
+    return false;
+  }
+
+  absl::StatusOr<absl_nonnull std::unique_ptr<PReadFile>> file =
+      file::OpenPRead(
+          temp_file.path,
+          PReadOpenOptions{.cache_policy = CachePolicy::kDirectIo});
+  if (!file.ok()) {
+    if (IsDirectIoUnsupported(file.status())) {
+      std::cerr << "Skipping direct-read test: " << file.status() << '\n';
+      return true;
+    }
+    return Expect(false,
+                  absl::StrCat("direct-read: failed to open reader: ",
+                               file.status().message()));
+  }
+
+  std::string reconstructed;
+  reconstructed.reserve(payload.size());
+  if (!Expect(
+          (*file)
+              ->PRead(0, payload.size(), [&](absl::string_view piece) {
+                reconstructed.append(piece);
+                return true;
+              })
+              .ok(),
+          "direct-read: full-file PRead failed")) {
+    return false;
+  }
+  if (!Expect(reconstructed == payload,
+              "direct-read: reconstructed payload mismatch")) {
+    return false;
+  }
+
+  reconstructed.clear();
+  if (!Expect(
+          (*file)
+              ->PRead(kSliceOffset, kSliceLength, [&](absl::string_view piece) {
+                reconstructed.append(piece);
+                return true;
+              })
+              .ok(),
+          "direct-read: sliced PRead failed")) {
+    return false;
+  }
+  return Expect(reconstructed ==
+                    payload.substr(kSliceOffset, kSliceLength),
+                "direct-read: sliced payload mismatch");
+}
+
+bool TestPosixDirectBackendReadsSmallFilesIfSupported() {
+  constexpr size_t kPayloadSize = 123;
+  TempFile temp_file = MakeTempFile("sackli-posix-direct-small");
+  const std::string payload = MakePatternPayload(kPayloadSize);
+  if (!WritePayload(temp_file, payload, "direct-small")) {
+    return false;
+  }
+
+  absl::StatusOr<absl_nonnull std::unique_ptr<PReadFile>> file =
+      file::OpenPRead(
+          temp_file.path,
+          PReadOpenOptions{.cache_policy = CachePolicy::kDirectIo});
+  if (!file.ok()) {
+    if (IsDirectIoUnsupported(file.status())) {
+      std::cerr << "Skipping direct-small test: " << file.status() << '\n';
+      return true;
+    }
+    return Expect(false,
+                  absl::StrCat("direct-small: failed to open reader: ",
+                               file.status().message()));
+  }
+
+  absl::StatusOr<std::string> reconstructed = (*file)->PReadToString(0, size_t{123});
+  if (!Expect(reconstructed.ok(),
+              absl::StrCat("direct-small: PReadToString failed: ",
+                           reconstructed.status().message()))) {
+    return false;
+  }
+  return Expect(*reconstructed == payload,
+                "direct-small: reconstructed payload mismatch");
+}
+
+bool TestPosixDirectBackendReadsAcrossTailBoundaryIfSupported() {
+  constexpr size_t kPayloadSize = (2 << 20) + 123;
+  constexpr size_t kSliceOffset = (2 << 20) - 37;
+  constexpr size_t kSliceLength = 100;
+  TempFile temp_file = MakeTempFile("sackli-posix-direct-tail-boundary");
+  const std::string payload = MakePatternPayload(kPayloadSize);
+  if (!WritePayload(temp_file, payload, "direct-tail-boundary")) {
+    return false;
+  }
+
+  absl::StatusOr<absl_nonnull std::unique_ptr<PReadFile>> file =
+      file::OpenPRead(
+          temp_file.path,
+          PReadOpenOptions{.cache_policy = CachePolicy::kDirectIo});
+  if (!file.ok()) {
+    if (IsDirectIoUnsupported(file.status())) {
+      std::cerr << "Skipping direct-tail-boundary test: " << file.status()
+                << '\n';
+      return true;
+    }
+    return Expect(false,
+                  absl::StrCat("direct-tail-boundary: failed to open reader: ",
+                               file.status().message()));
+  }
+
+  std::string reconstructed;
+  if (!Expect(
+          (*file)
+              ->PRead(kSliceOffset, kSliceLength, [&](absl::string_view piece) {
+                reconstructed.append(piece);
+                return true;
+              })
+              .ok(),
+          "direct-tail-boundary: PRead failed")) {
+    return false;
+  }
+  return Expect(reconstructed ==
+                    payload.substr(kSliceOffset, kSliceLength),
+                "direct-tail-boundary: sliced payload mismatch");
+}
+
+bool TestPosixDirectBackendHonorsEarlyStopIfSupported() {
+  constexpr size_t kPayloadSize = (2 << 20) + 123;
+  TempFile temp_file = MakeTempFile("sackli-posix-direct-early-stop");
+  const std::string payload = MakePatternPayload(kPayloadSize);
+  if (!WritePayload(temp_file, payload, "direct-early-stop")) {
+    return false;
+  }
+
+  absl::StatusOr<absl_nonnull std::unique_ptr<PReadFile>> file =
+      file::OpenPRead(
+          temp_file.path,
+          PReadOpenOptions{.cache_policy = CachePolicy::kDirectIo});
+  if (!file.ok()) {
+    if (IsDirectIoUnsupported(file.status())) {
+      std::cerr << "Skipping direct-early-stop test: " << file.status()
+                << '\n';
+      return true;
+    }
+    return Expect(false,
+                  absl::StrCat("direct-early-stop: failed to open reader: ",
+                               file.status().message()));
+  }
+
+  size_t callback_count = 0;
+  size_t first_piece_size = 0;
+  if (!Expect(
+          (*file)
+              ->PRead(0, payload.size(), [&](absl::string_view piece) {
+                ++callback_count;
+                first_piece_size = piece.size();
+                return false;
+              })
+              .ok(),
+          "direct-early-stop: PRead failed")) {
+    return false;
+  }
+  return Expect(callback_count == 1 && first_piece_size > 0,
+                "direct-early-stop: expected exactly one callback");
+}
+
+bool TestReaderReadsShardedDirectIoFilesIfSupported() {
+  // With 4 KiB alignment, this places the last record fully in the cached tail
+  // while the large middle record spans both direct reads and the tail cache.
+  const std::string middle_record(8 << 20, 'x');
+  const std::vector<absl::string_view> records = {
+      "alpha",
+      middle_record,
+      "omega",
+  };
+  const std::string bag = MakeTailBag(records);
+  const std::string prefix = MakeTempPath("sackli-reader-direct-open");
+  TempFile shard0{.path = absl::StrCat(prefix, "-00000-of-00002.bag")};
+  TempFile shard1{.path = absl::StrCat(prefix, "-00001-of-00002.bag")};
+  if (!WritePayload(shard0, bag, "reader-direct-sharded") ||
+      !WritePayload(shard1, bag, "reader-direct-sharded")) {
+    return false;
+  }
+
+  SackliReader::Options options{
+      .compression = CompressionNone{},
+      .limits_storage = LimitsStorage::kOnDisk,
+      .access_pattern = AccessPattern::kRandom,
+      .cache_policy = CachePolicy::kDirectIo,
+      .max_parallelism = 8,
+  };
+  absl::StatusOr<SackliReader> reader =
+      SackliReader::Open(absl::StrCat(prefix, "@2.bag"), std::move(options));
+  if (!reader.ok()) {
+    if (IsDirectIoUnsupported(reader.status())) {
+      std::cerr << "Skipping reader-direct-sharded test: "
+                << reader.status() << '\n';
+      return true;
+    }
+    return Expect(false, absl::StrCat("reader-direct-sharded: open failed: ",
+                                      reader.status().message()));
+  }
+
+  if (!Expect(reader->size() == 2 * records.size(),
+              "reader-direct-sharded: wrong reader size")) {
+    return false;
+  }
+  absl::StatusOr<std::string> first = (*reader)[0];
+  if (!Expect(first.ok() && *first == records[0],
+              "reader-direct-sharded: first record mismatch")) {
+    return false;
+  }
+  absl::StatusOr<std::string> middle = (*reader)[1];
+  if (!Expect(middle.ok() && *middle == middle_record,
+              "reader-direct-sharded: middle record mismatch")) {
+    return false;
+  }
+  absl::StatusOr<std::string> last = (*reader)[reader->size() - 1];
+  return Expect(last.ok() && *last == records[2],
+                "reader-direct-sharded: last record mismatch");
+}
+
 }  // namespace
 
 int RunTests() {
   const bool ok = TestTailUsesSeparateLimitHandlesForPosixFiles() &&
+                  TestTailUsesSeparateLimitHandlesForDirectIoPosixFiles() &&
                   TestTailReusesRecordHandleForAccessPatternOnly() &&
                   TestSeparateLimitsKeepDefaultReadOptions() &&
                   TestTailBatchesAdjacentPosixFilesWithSameReadOptions() &&
@@ -460,7 +777,12 @@ int RunTests() {
                   TestTailPosixUsesSeparateLimitHandlesAtDefaultOptions() &&
                   TestSeparateLimitsHandleLeadingSlashPrefixes() &&
                   TestMixedFilespecsApplyPosixOptionsOnlyToPosixFiles() &&
-                  TestPosixPReadBackendStreamsLargeReads();
+                  TestPosixPReadBackendStreamsLargeReads() &&
+                  TestPosixDirectBackendReadsLargeReadsIfSupported() &&
+                  TestPosixDirectBackendReadsSmallFilesIfSupported() &&
+                  TestPosixDirectBackendReadsAcrossTailBoundaryIfSupported() &&
+                  TestPosixDirectBackendHonorsEarlyStopIfSupported() &&
+                  TestReaderReadsShardedDirectIoFilesIfSupported();
   return ok ? 0 : 1;
 }
 

@@ -121,7 +121,7 @@ Args:
   access_pattern: Hint for how records are expected to be read from local
     files.
   cache_policy: Policy for how aggressively to retain record data in the local
-    page cache.
+    page cache or avoid it.
 )";
 
 constexpr char kInitDoc[] = R"(

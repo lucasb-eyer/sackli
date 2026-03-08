@@ -60,7 +60,8 @@ class SackliReader {
     // Hint for how records are expected to be read from local files.
     AccessPattern access_pattern = AccessPattern::kSystem;
 
-    // Policy for how aggressively to retain record data in the page cache.
+    // Policy for how aggressively to retain or avoid record data in the page
+    // cache.
     CachePolicy cache_policy = CachePolicy::kSystem;
 
     // Maximum number of parallel operations. Creates an executor with this

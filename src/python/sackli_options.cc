@@ -47,7 +47,8 @@ constexpr char kAccessPatternEnumDoc[] = R"(
 Hint for how records are expected to be read from local files.)";
 
 constexpr char kCachePolicyEnumDoc[] = R"(
-Policy for how aggressively to retain record data in the local page cache.)";
+Policy for how aggressively to retain or avoid record data in the local page
+cache.)";
 
 }  // namespace
 
@@ -107,7 +108,9 @@ void RegisterSackliOptions(py::module& m) {
       .value("SYSTEM", CachePolicy::kSystem,
              "Use the system default caching behavior")
       .value("DROP_AFTER_READ", CachePolicy::kDropAfterRead,
-             "Drop record data from cache after it is read");
+             "Drop record data from cache after it is read")
+      .value("DIRECT_IO", CachePolicy::kDirectIo,
+             "Use direct I/O for record reads when supported");
 }
 
 }  // namespace sackli

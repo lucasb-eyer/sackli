@@ -69,6 +69,11 @@ _CACHE_POLICIES = (
     sackli.CachePolicy.SYSTEM,
     sackli.CachePolicy.DROP_AFTER_READ,
 )
+_DIRECT_IO_UNSUPPORTED_MARKERS = (
+    'Direct I/O',
+    'O_DIRECT',
+    'STATX_DIOALIGN',
+)
 
 
 def _generate_record(row: int) -> bytes:
@@ -157,6 +162,44 @@ _READER_POLICY_CASES = tuple(
 )
 
 _SHARED_RANDOM_ACCESS_CASES = tuple(itertools.product(_NAMES, _CACHE_POLICIES))
+
+
+def _assert_reader_matches_records(
+    reader: sackli.Reader, records: Sequence[bytes]
+) -> None:
+  check_indices = [0, len(records) // 2, len(records) - 1]
+  for index in check_indices:
+    assert reader[index] == records[index], f'row: {index}'
+    assert reader[index] == records[index], f'row: {index}'
+
+  start = 11
+  count = 9
+  assert reader.read_range(start, count) == records[start : start + count]
+
+  indices = [7, 2, 7, len(records) - 3]
+  result = reader.read_indices(indices)
+  assert result == [records[index] for index in indices]
+  assert result[0] is result[2]
+
+
+def _is_direct_io_unsupported(exc: ValueError) -> bool:
+  return any(marker in str(exc) for marker in _DIRECT_IO_UNSUPPORTED_MARKERS)
+
+
+def _open_direct_io_reader_or_skip(
+    file: Path, **options: object
+) -> sackli.Reader:
+  try:
+    return sackli.Reader(
+        file,
+        sackli.Reader.Options(
+            cache_policy=sackli.CachePolicy.DIRECT_IO, **options
+        ),
+    )
+  except ValueError as exc:
+    if _is_direct_io_unsupported(exc):
+      pytest.skip(str(exc))
+    raise
 
 
 def test_approximate_bytes_per_record(tmp_path: Path) -> None:
@@ -358,20 +401,50 @@ def test_reader_access_and_cache_policies(
           cache_policy=cache_policy,
       ),
   )
+  _assert_reader_matches_records(reader, records)
 
-  check_indices = [0, len(records) // 2, len(records) - 1]
-  for index in check_indices:
-    assert reader[index] == records[index], f'row: {index}'
-    assert reader[index] == records[index], f'row: {index}'
 
-  start = 11
-  count = 9
-  assert reader.read_range(start, count) == records[start : start + count]
+@pytest.mark.parametrize(
+    ('name', 'limits_placement', 'limits_storage', 'access_pattern'),
+    itertools.product(
+        _NAMES,
+        _LIMITS_PLACEMENTS,
+        _LIMITS_STORAGES,
+        _ACCESS_PATTERNS,
+    ),
+)
+def test_reader_direct_io_policies_if_supported(
+    tmp_path: Path,
+    name: str,
+    limits_placement: sackli.LimitsPlacement,
+    limits_storage: sackli.LimitsStorage,
+    access_pattern: sackli.AccessPattern,
+) -> None:
+  file = tmp_path / name
+  records = _generate_stress_records(_STRESS_RECORDS)
+  with sackli.Writer(
+      file, sackli.Writer.Options(limits_placement=limits_placement)
+  ) as writer:
+    for record in records:
+      writer.write(record)
 
-  indices = [7, 2, 7, len(records) - 3]
-  result = reader.read_indices(indices)
-  assert result == [records[index] for index in indices]
-  assert result[0] is result[2]
+  reader = _open_direct_io_reader_or_skip(
+      file,
+      limits_placement=limits_placement,
+      limits_storage=limits_storage,
+      access_pattern=access_pattern,
+  )
+  _assert_reader_matches_records(reader, records)
+
+
+@pytest.mark.parametrize('name', _NAMES)
+def test_reader_direct_io_if_supported(tmp_path: Path, name: str) -> None:
+  file = tmp_path / name
+  records = _generate_stress_records(_STRESS_RECORDS)
+  _write_records(file, records)
+
+  reader = _open_direct_io_reader_or_skip(file)
+  _assert_reader_matches_records(reader, records)
 
 
 def test_sequence_methods(tmp_path: Path) -> None:
@@ -547,6 +620,30 @@ def test_shared_reader_random_access_threadsafe(
           access_pattern=sackli.AccessPattern.RANDOM,
           cache_policy=cache_policy,
       ),
+  )
+  num_workers = _thread_worker_count()
+  barrier = threading.Barrier(num_workers)
+
+  def worker(worker_id: int) -> None:
+    rng = np.random.default_rng(worker_id)
+    barrier.wait()
+    for _ in range(_thread_iterations()):
+      index = int(rng.integers(len(records)))
+      assert reader[index] == records[index]
+      assert reader[index] == records[index]
+
+  _run_in_threads(num_workers, worker)
+
+
+@pytest.mark.parametrize('name', _NAMES)
+def test_shared_reader_direct_io_random_access_threadsafe(
+    tmp_path: Path, name: str
+) -> None:
+  file = tmp_path / name
+  records = _generate_stress_records(_STRESS_RECORDS)
+  _write_records(file, records)
+  reader = _open_direct_io_reader_or_skip(
+      file, access_pattern=sackli.AccessPattern.RANDOM
   )
   num_workers = _thread_worker_count()
   barrier = threading.Barrier(num_workers)
