@@ -15,6 +15,7 @@
 cmake_minimum_required(VERSION 3.28)
 project(sackli LANGUAGES CXX)
 
+include(CheckCXXSourceCompiles)
 include(FetchContent)
 option(BUILD_TESTING "Build tests" OFF)
 include(CTest)
@@ -48,6 +49,48 @@ set(CMAKE_CXX_FLAGS "${SAVED_CMAKE_CXX_FLAGS}")
 set(CMAKE_SUPPRESS_DEVELOPER_WARNINGS FALSE)
 
 set(CMAKE_SKIP_INSTALL_RULES OFF)
+
+check_cxx_source_compiles(
+  [=[
+    #include <fcntl.h>
+    #include <sys/types.h>
+
+    int main() {
+      int advice = POSIX_FADV_RANDOM + POSIX_FADV_SEQUENTIAL +
+                   POSIX_FADV_DONTNEED;
+      return posix_fadvise(0, static_cast<off_t>(0), static_cast<off_t>(0),
+                           advice);
+    }
+  ]=]
+  SACKLI_HAVE_POSIX_FADVISE
+)
+
+check_cxx_source_compiles(
+  [=[
+    #include <fcntl.h>
+
+    int main() { return fcntl(0, F_NOCACHE, 1); }
+  ]=]
+  SACKLI_HAVE_F_NOCACHE
+)
+
+check_cxx_source_compiles(
+  [=[
+    #include <sys/mman.h>
+
+    int main() { return MAP_SHARED | MAP_NOCACHE; }
+  ]=]
+  SACKLI_HAVE_MAP_NOCACHE
+)
+
+check_cxx_source_compiles(
+  [=[
+    #include <sys/mman.h>
+
+    int main() { return madvise(nullptr, 0, MADV_DONTNEED); }
+  ]=]
+  SACKLI_HAVE_MADV_DONTNEED
+)
 
 include(cmake/sackli_cc.cmake)
 
@@ -96,6 +139,15 @@ sackli_cc_library(
     absl::strings
     sackli_file_system
     sackli_internal
+)
+
+target_compile_definitions(
+  sackli_file_system_posix
+  PRIVATE
+    SACKLI_HAVE_POSIX_FADVISE=$<BOOL:${SACKLI_HAVE_POSIX_FADVISE}>
+    SACKLI_HAVE_F_NOCACHE=$<BOOL:${SACKLI_HAVE_F_NOCACHE}>
+    SACKLI_HAVE_MAP_NOCACHE=$<BOOL:${SACKLI_HAVE_MAP_NOCACHE}>
+    SACKLI_HAVE_MADV_DONTNEED=$<BOOL:${SACKLI_HAVE_MADV_DONTNEED}>
 )
 
 
