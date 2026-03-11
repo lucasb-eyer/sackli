@@ -128,12 +128,12 @@ jobs:
           cmake --build build --parallel
           ctest --test-dir build --output-on-failure
 
-  wheel-macos-arm64-cloud-smoke:
+  python-posix-macos-arm64-cloud-smoke:
     runs-on: macos-15
     permissions:
       contents: read
     env:
-      MACOSX_DEPLOYMENT_TARGET: "15.0"
+      TEST_TMPDIR: ${{ github.workspace }}/test_tmpdir
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -144,13 +144,30 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install uv
-        run: python -m pip install uv
+      - name: Install build and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install \
+            scikit-build-core setuptools_scm \
+            cmake ninja pytest numpy
 
-      - name: Build macOS wheel with cloud filesystems
-        uses: pypa/cibuildwheel@v3.4.0
-        with:
-          output-dir: dist
-        env:
-          CIBW_BUILD: cp312-macosx_arm64
-          CIBW_ARCHS_MACOS: arm64
+      - name: Install sackli with cloud filesystems
+        run: |
+          python -m pip install -e . --no-build-isolation \
+            --config-settings=cmake.args=-DSACKLI_ENABLE_GCS=ON \
+            --config-settings=cmake.args=-DSACKLI_ENABLE_S3=ON
+
+      - name: Run Python tests
+        run: python -m pytest -q src/python/sackli_test.py
+
+      - name: Configure C++ tests
+        run: |
+          cmake -S . -B build-cloud -G Ninja \
+            -DSACKLI_ENABLE_GCS=ON \
+            -DSACKLI_ENABLE_S3=ON \
+            -DBUILD_TESTING=ON
+
+      - name: Build and run C++ tests
+        run: |
+          cmake --build build-cloud --parallel
+          ctest --test-dir build-cloud --output-on-failure
