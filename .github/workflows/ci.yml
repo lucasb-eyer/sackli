@@ -127,3 +127,25 @@ jobs:
         run: |
           cmake --build build --parallel
           ctest --test-dir build --output-on-failure
+
+  wheel-macos-arm64-cloud-smoke:
+    runs-on: macos-15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Build macOS wheel with cloud filesystems
+        uses: pypa/cibuildwheel@v3.4.0
+        with:
+          output-dir: dist
+        env:
+          CIBW_BUILD: cp312-macosx_arm64
+          CIBW_ARCHS_MACOS: arm64
