@@ -69,6 +69,8 @@ jobs:
           - cp312-macosx_arm64
           - cp313-macosx_arm64
           - cp314-macosx_arm64
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "15.0"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
