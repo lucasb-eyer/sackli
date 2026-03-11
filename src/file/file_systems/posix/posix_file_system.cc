@@ -117,7 +117,12 @@ PosixReadBackend SelectReadBackend(const PReadOpenOptions& options) {
     case CachePolicy::kDirectIo:
       return PosixReadBackend::kDirect;
     case CachePolicy::kDropAfterRead:
+#if SACKLI_HAVE_MAP_NOCACHE && SACKLI_HAVE_MADV_DONTNEED
+      return options.prefer_streaming ? PosixReadBackend::kPRead
+                                      : PosixReadBackend::kMmap;
+#else
       return PosixReadBackend::kPRead;
+#endif
     case CachePolicy::kSystem:
       return options.prefer_streaming ? PosixReadBackend::kPRead
                                       : PosixReadBackend::kMmap;
@@ -143,14 +148,35 @@ absl::StatusOr<size_t> FileSize(int fd) {
   return stat.st_size;
 }
 
-absl::StatusOr<MmapUniquePtr> MmapFile(int fd, size_t size) {
+absl::Status ConfigureNoCacheFd(int fd) {
+#if SACKLI_HAVE_F_NOCACHE
+  if (fcntl(fd, F_NOCACHE, 1) != 0) {
+    return absl::ErrnoToStatus(errno, "fcntl(F_NOCACHE)");
+  }
+#else
+  (void)fd;
+#endif
+  return absl::OkStatus();
+}
+
+absl::StatusOr<MmapUniquePtr> MmapFile(int fd, size_t size,
+                                       bool no_cache = false) {
   // We cannot mmap an empty file but we can use an empty string_view.
   if (size == 0) {
     return MmapUniquePtr(nullptr, MmapDeleter(0));
   }
 
+#if SACKLI_HAVE_MAP_NOCACHE
+  int mmap_flags = MAP_SHARED;
+  if (no_cache) {
+    mmap_flags |= MAP_NOCACHE;
+  }
+#else
+  int mmap_flags = MAP_SHARED;
+  (void)no_cache;
+#endif
   void* records_mmap = mmap(/*addr=*/nullptr, /*length=*/size,
-                            /*prot=*/PROT_READ, /*flags=*/MAP_SHARED,
+                            /*prot=*/PROT_READ, /*flags=*/mmap_flags,
                             /*fd=*/fd, /*offset=*/0);
   if (records_mmap == MAP_FAILED) {
     // kNotFound is confusing for user for ENODEV.
@@ -220,6 +246,7 @@ int MadviseAccessPattern(AccessPattern access_pattern) {
   return -1;
 }
 
+#if SACKLI_HAVE_POSIX_FADVISE
 int FadviseAccessPattern(AccessPattern access_pattern) {
   switch (access_pattern) {
     case AccessPattern::kRandom:
@@ -231,6 +258,7 @@ int FadviseAccessPattern(AccessPattern access_pattern) {
   }
   return -1;
 }
+#endif
 
 void ApplyMmapAccessPattern(void* data, size_t size,
                             AccessPattern access_pattern) {
@@ -241,6 +269,7 @@ void ApplyMmapAccessPattern(void* data, size_t size,
   (void)madvise(data, size, advice);
 }
 
+#if SACKLI_HAVE_POSIX_FADVISE
 void ApplyFdAccessPattern(int fd, AccessPattern access_pattern) {
   int advice = FadviseAccessPattern(access_pattern);
   if (advice < 0) {
@@ -248,6 +277,12 @@ void ApplyFdAccessPattern(int fd, AccessPattern access_pattern) {
   }
   (void)posix_fadvise(fd, 0, 0, advice);
 }
+#else
+void ApplyFdAccessPattern(int fd, AccessPattern access_pattern) {
+  (void)fd;
+  (void)access_pattern;
+}
+#endif
 
 size_t PageSize() {
   static const size_t page_size = []() {
@@ -269,6 +304,29 @@ size_t AlignUp(size_t value, size_t alignment) {
   return value + (alignment - remainder);
 }
 
+#if SACKLI_HAVE_MADV_DONTNEED
+void DropMappedCache(void* data, size_t size, size_t offset, size_t num_bytes) {
+  if (data == nullptr || num_bytes == 0) {
+    return;
+  }
+  size_t page_size = PageSize();
+  size_t begin = AlignDown(offset, page_size);
+  size_t end = std::min(size, AlignUp(offset + num_bytes, page_size));
+  if (end <= begin) {
+    return;
+  }
+  (void)madvise(static_cast<char*>(data) + begin, end - begin, MADV_DONTNEED);
+}
+#else
+void DropMappedCache(void* data, size_t size, size_t offset, size_t num_bytes) {
+  (void)data;
+  (void)size;
+  (void)offset;
+  (void)num_bytes;
+}
+#endif
+
+#if SACKLI_HAVE_POSIX_FADVISE
 void DropFileCache(int fd, size_t file_size, size_t offset, size_t num_bytes) {
   if (num_bytes == 0) {
     return;
@@ -282,10 +340,21 @@ void DropFileCache(int fd, size_t file_size, size_t offset, size_t num_bytes) {
   (void)posix_fadvise(fd, static_cast<off_t>(begin),
                       static_cast<off_t>(end - begin), POSIX_FADV_DONTNEED);
 }
+#else
+void DropFileCache(int fd, size_t file_size, size_t offset, size_t num_bytes) {
+  // Fall back to the default kernel behavior on platforms without
+  // posix_fadvise(2), such as macOS.
+  (void)fd;
+  (void)file_size;
+  (void)offset;
+  (void)num_bytes;
+}
+#endif
 
 class PosixMmapPReadFile : public PReadFile {
  public:
-  explicit PosixMmapPReadFile(MmapUniquePtr mmap) : mmap_(std::move(mmap)) {}
+  explicit PosixMmapPReadFile(MmapUniquePtr mmap, bool drop_after_read)
+      : mmap_(std::move(mmap)), drop_after_read_(drop_after_read) {}
   size_t size() const override { return mmap_.get_deleter().mmap_size(); }
 
   absl::Status PRead(
@@ -298,13 +367,22 @@ class PosixMmapPReadFile : public PReadFile {
     if (num_bytes == 0) {
       return absl::OkStatus();
     }
-    callback(absl::string_view(static_cast<const char*>(mmap_.get()) + offset,
-                               num_bytes));
+    const bool continue_reading =
+        callback(absl::string_view(static_cast<const char*>(mmap_.get()) +
+                                       offset,
+                                   num_bytes));
+    if (drop_after_read_) {
+      DropMappedCache(mmap_.get(), mmap_size, offset, num_bytes);
+    }
+    if (!continue_reading) {
+      return absl::OkStatus();
+    }
     return absl::OkStatus();
   }
 
  private:
   MmapUniquePtr mmap_;
+  bool drop_after_read_;
 };
 
 class PosixBufferedFdPReadFile : public PReadFile {
@@ -794,9 +872,26 @@ PosixFileSystem::OpenPRead(absl::string_view filename,
     return std::make_unique<PosixDirectPReadFile>(
         *std::move(direct_fd), *size, alignments->mem_align,
         alignments->read_align, *std::move(tail_cache));
+#elif SACKLI_HAVE_F_NOCACHE
+    absl::StatusOr<ScopedFd> direct_fd = OpenReadOnlyFd(filename_str);
+    if (!direct_fd.ok()) {
+      return direct_fd.status();
+    }
+    if (absl::Status status = ConfigureNoCacheFd(direct_fd->get());
+        !status.ok()) {
+      return status;
+    }
+    absl::StatusOr<size_t> size = FileSize(direct_fd->get());
+    if (!size.ok()) {
+      return size.status();
+    }
+    ApplyFdAccessPattern(direct_fd->get(), options.access_pattern);
+    return std::make_unique<PosixBufferedFdPReadFile>(
+        *std::move(direct_fd), *size, false);
 #else
     return absl::UnimplementedError(
-        "Direct I/O backend requires Linux O_DIRECT support.");
+        "Direct I/O backend requires Linux O_DIRECT or an equivalent no-cache "
+        "fd API.");
 #endif
   }
 
@@ -809,20 +904,31 @@ PosixFileSystem::OpenPRead(absl::string_view filename,
     return size.status();
   }
 
+  if (backend == PosixReadBackend::kPRead &&
+      options.cache_policy == CachePolicy::kDropAfterRead) {
+    if (absl::Status status = ConfigureNoCacheFd(fd->get()); !status.ok()) {
+      return status;
+    }
+  }
+
   const bool drop_after_read =
-      options.cache_policy == CachePolicy::kDropAfterRead;
+      options.cache_policy == CachePolicy::kDropAfterRead &&
+      SACKLI_HAVE_POSIX_FADVISE;
   if (backend == PosixReadBackend::kPRead) {
     ApplyFdAccessPattern(fd->get(), options.access_pattern);
     return std::make_unique<PosixBufferedFdPReadFile>(
         *std::move(fd), *size, drop_after_read);
   }
 
-  absl::StatusOr<MmapUniquePtr> mmap = MmapFile(fd->get(), *size);
+  absl::StatusOr<MmapUniquePtr> mmap = MmapFile(
+      fd->get(), *size,
+      options.cache_policy == CachePolicy::kDropAfterRead);
   if (!mmap.ok()) {
     return mmap.status();
   }
   ApplyMmapAccessPattern(mmap->get(), *size, options.access_pattern);
-  return std::make_unique<PosixMmapPReadFile>(*std::move(mmap));
+  return std::make_unique<PosixMmapPReadFile>(
+      *std::move(mmap), options.cache_policy == CachePolicy::kDropAfterRead);
 }
 
 absl::Status PosixFileSystem::Delete(absl::string_view filename,

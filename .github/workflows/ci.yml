@@ -79,3 +79,51 @@ jobs:
         run: |
           cmake --build build --parallel
           ctest --test-dir build --output-on-failure
+
+  python-posix-macos-arm64:
+    runs-on: macos-15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13", "3.14"]
+    env:
+      TEST_TMPDIR: ${{ github.workspace }}/test_tmpdir
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install build and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install \
+            scikit-build-core setuptools_scm \
+            cmake ninja pytest numpy
+
+      - name: Install sackli without cloud filesystems
+        run: |
+          python -m pip install -e . --no-build-isolation \
+            --config-settings=cmake.args=-DSACKLI_ENABLE_GCS=OFF \
+            --config-settings=cmake.args=-DSACKLI_ENABLE_S3=OFF
+
+      - name: Run Python tests
+        run: python -m pytest -q src/python/sackli_test.py
+
+      - name: Configure C++ tests
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DSACKLI_ENABLE_GCS=OFF \
+            -DSACKLI_ENABLE_S3=OFF \
+            -DBUILD_TESTING=ON
+
+      - name: Build and run C++ tests
+        run: |
+          cmake --build build --parallel
+          ctest --test-dir build --output-on-failure

@@ -59,11 +59,40 @@ jobs:
           name: dist-${{ matrix.build }}
           path: dist/*
 
+  build-wheels-macos:
+    name: build-wheel (${{ matrix.build }})
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        build:
+          - cp312-macosx_arm64
+          - cp313-macosx_arm64
+          - cp314-macosx_arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build wheel
+        uses: pypa/cibuildwheel@v3.4.0
+        with:
+          output-dir: dist
+        env:
+          CIBW_ARCHS_MACOS: arm64
+          CIBW_BUILD: ${{ matrix.build }}
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.build }}
+          path: dist/*
+
   publish:
     name: publish
     needs:
       - build-sdist
       - build-wheels
+      - build-wheels-macos
     runs-on: ubuntu-22.04
     permissions:
       id-token: write

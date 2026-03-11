@@ -110,7 +110,7 @@ void RegisterSackliOptions(py::module& m) {
       .value("DROP_AFTER_READ", CachePolicy::kDropAfterRead,
              "Drop record data from cache after it is read")
       .value("DIRECT_IO", CachePolicy::kDirectIo,
-             "Use direct I/O for record reads when supported");
+             "Use direct I/O or best-effort no-cache reads when supported");
 }
 
 }  // namespace sackli
