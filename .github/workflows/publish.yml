@@ -36,6 +36,7 @@ jobs:
       fail-fast: false
       matrix:
         build:
+          - cp312-manylinux_x86_64
           - cp313-manylinux_x86_64
           - cp313t-manylinux_x86_64
           - cp314-manylinux_x86_64
