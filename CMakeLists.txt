@@ -302,24 +302,6 @@ file(WRITE ${CMAKE_BINARY_DIR}/__init__.py [[# Copyright 2025 Google LLC
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from importlib import metadata as _metadata
-
-
-def _sackli_has_dist(name: str) -> bool:
-    try:
-        _metadata.version(name)
-        return True
-    except _metadata.PackageNotFoundError:
-        return False
-
-
-if _sackli_has_dist("sackli") and _sackli_has_dist("sackli-freethreading"):
-    raise RuntimeError(
-        "Both 'sackli' and 'sackli-freethreading' are installed. "
-        "Uninstall one to avoid a broken setup: "
-        "pip uninstall sackli sackli-freethreading"
-    )
-
 from sackli.lib.sackli import *
 ]])
 
