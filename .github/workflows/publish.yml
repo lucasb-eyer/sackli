@@ -38,7 +38,6 @@ jobs:
         build:
           - cp312-manylinux_x86_64
           - cp313-manylinux_x86_64
-          - cp313t-manylinux_x86_64
           - cp314-manylinux_x86_64
           - cp314t-manylinux_x86_64
     steps:
@@ -69,6 +68,7 @@ jobs:
           - cp312-macosx_arm64
           - cp313-macosx_arm64
           - cp314-macosx_arm64
+          - cp314t-macosx_arm64
     env:
       MACOSX_DEPLOYMENT_TARGET: "14.0"
     steps:
@@ -90,6 +90,7 @@ jobs:
           output-dir: dist
         env:
           CIBW_ARCHS_MACOS: arm64
+          CIBW_ENABLE: cpython-freethreading
           CIBW_BUILD: ${{ matrix.build }}
 
       - name: Upload wheel artifact

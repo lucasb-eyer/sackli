@@ -16,7 +16,7 @@ maintainers = [
     { name = "Lucas Beyer" },
 ]
 readme = "README.md"
-requires-python = ">=3.10,<3.15"
+requires-python = ">=3.12,<3.15"
 
 classifiers = [
     "Development Status :: 5 - Production/Stable",
@@ -51,7 +51,7 @@ cmake.args = ["-Wno-dev"]
 # Keep the 2_28 baseline for openssl3, but let cibuildwheel pick a current
 # official image so new Python interpreters (for example 3.14) are available.
 manylinux-x86_64-image = "manylinux_2_28"
-build = "cp3*-manylinux_x86_64"
+build = "cp312-* cp313-* cp314-* cp314t-*"
 build-frontend = "build[uv]"
 build-verbosity = 1
 test-command = "pytest {package}/src"
