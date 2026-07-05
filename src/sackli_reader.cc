@@ -566,15 +566,16 @@ struct SackliReader::State {
         [&](size_t shard_index) -> absl::Status {
           const internal::ShardRange& shard_range = shard_ranges[shard_index];
           absl::Status compress_status = absl::OkStatus();
+          // The callback below is invoked sequentially within this range, so
+          // one decompressor can be reused for all its records.
+          auto decompressor = decompressor_factory_ != nullptr
+                                  ? decompressor_pool_.Get(decompressor_factory_)
+                                  : nullptr;
           auto status = shards_[shard_range.shard].ReadRange(
               shard_range.shard_start, shard_range.count,
               [&](size_t index, absl::string_view compressed) {
                 size_t result_index = shard_range.result_stride * index +
                                       shard_range.result_offset;
-                auto decompressor =
-                    decompressor_factory_ != nullptr
-                        ? decompressor_pool_.Get(decompressor_factory_)
-                        : nullptr;
                 compress_status = DecompressInto(
                     decompressor.get(), compressed,
                     [result_index, &allocate_for_index](size_t num_bytes) {
