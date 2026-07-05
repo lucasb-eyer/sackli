@@ -279,12 +279,25 @@ Returns the index of the first occurrence of the given value in the reader.
 Raises a ValueError if the value is not found.
 )";
 
-size_t IndexOf(const SackliReader& reader, py::bytes value, size_t start,
-               std::optional<size_t> stop) {
+size_t IndexOf(const SackliReader& reader, py::bytes value, ssize_t start,
+               std::optional<ssize_t> stop) {
   absl::string_view bytes = py::cast<absl::string_view>(value);
+  // Sequence.index semantics: negative bounds count from the end and both
+  // bounds are clamped to [0, size]; the search range is [start, stop).
+  const ssize_t size = static_cast<ssize_t>(reader.size());
+  if (start < 0) {
+    start = std::max<ssize_t>(start + size, 0);
+  }
+  ssize_t stop_index = stop.value_or(size);
+  if (stop_index < 0) {
+    stop_index += size;
+  }
+  stop_index = std::min(stop_index, size);
+  if (start >= stop_index) {
+    throw py::value_error("value is not in the sackli.Reader");
+  }
   size_t index = start;
-  auto reader_slice =
-      reader.Slice(start, 1, stop.value_or(reader.size() - start));
+  auto reader_slice = reader.Slice(start, 1, stop_index - start);
   ThrowNonOkStatusAsException(reader_slice.status());
   if (!AnyOf(*std::move(reader_slice),
              [bytes, &index](absl::string_view record) {

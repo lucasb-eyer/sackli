@@ -466,6 +466,21 @@ def test_sequence_methods(tmp_path: Path) -> None:
   with pytest.raises(ValueError):
     _ = reader.index(records[11], stop=10)
 
+  # `stop` bounds the search window [start, stop) also when start > 0.
+  with pytest.raises(ValueError):
+    _ = reader.index(records[12], start=3, stop=10)
+  assert reader.index(records[5], start=3, stop=10) == 5
+
+  # Out-of-range bounds are clamped rather than raising IndexError.
+  assert reader.index(records[5], stop=10**9) == 5
+  with pytest.raises(ValueError):
+    _ = reader.index(records[0], start=100)
+
+  # Negative bounds count from the end, like list.index.
+  assert reader.index(records[11], start=-15) == 11
+  with pytest.raises(ValueError):
+    _ = reader.index(records[0], start=-5)
+
   assert reader.count(records[0]) == 1
   assert reader.count(records[11]) == 1
   assert reader.count(b'') == 5
