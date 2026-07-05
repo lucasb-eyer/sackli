@@ -110,6 +110,11 @@ for i in range(10):
   random_item: bytes = next(data_iter)
 ```
 
+Note that the `Sequence` methods `value in reader`, `reader.count(value)` and
+`reader.index(value)` scan the records linearly — on a huge file-set they read
+(and decompress) everything up to the first match. Use `sackli.Index` /
+`sackli.MultiIndex` if you need repeated record lookups.
+
 #### Python Reader - `Index` and `MultiIndex`
 
 You can use `Index` to find the first index of a record and `MultiIndex` to find

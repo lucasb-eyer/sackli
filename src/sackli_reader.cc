@@ -443,6 +443,7 @@ struct SackliReader::State {
       size_t result_index;
     };
     std::vector<Result> result_map;
+    result_map.reserve(indices.size());
     for (size_t i = 0; i < indices.size(); ++i) {
       size_t index = indices[i];
       if (index >= size()) {

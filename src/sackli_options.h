@@ -63,15 +63,6 @@ enum class LimitsStorage {
   kInMemory,  // Limits are copied from disk to RAM once and read from there.
 };
 
-// Writer only options.
-class ExistingFileMode {
-  // If the file already exists, the writer will start writing at this index.
-  // If the file contains less than `start_index` records, the writer will fail
-  // to open the file.
-  size_t start_index = 0;
-  bool opening_limits_placement_tail = false;
-};
-
 }  // namespace sackli
 
 #endif  // SACKLI_SRC_SACKLI_OPTIONS_H_

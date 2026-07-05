@@ -227,7 +227,7 @@ class SackliIterator {
   }
 
   SackliReader reader_;
-  size_t more_to_read_ = true;
+  bool more_to_read_ = true;
   absl::Mutex buffer_mutex_;
   absl::CondVar next_available_;
   absl::CondVar buffer_available_;

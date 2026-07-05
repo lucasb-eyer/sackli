@@ -367,15 +367,12 @@ class PosixMmapPReadFile : public PReadFile {
     if (num_bytes == 0) {
       return absl::OkStatus();
     }
-    const bool continue_reading =
-        callback(absl::string_view(static_cast<const char*>(mmap_.get()) +
-                                       offset,
-                                   num_bytes));
+    // The whole range is delivered as a single piece, so the callback's
+    // continue/stop return value has no further effect.
+    callback(absl::string_view(
+        static_cast<const char*>(mmap_.get()) + offset, num_bytes));
     if (drop_after_read_) {
       DropMappedCache(mmap_.get(), mmap_size, offset, num_bytes);
-    }
-    if (!continue_reading) {
-      return absl::OkStatus();
     }
     return absl::OkStatus();
   }

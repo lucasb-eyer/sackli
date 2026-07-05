@@ -68,9 +68,6 @@ absl::Status ZstdDecompressor::Decompress(
 absl::Status ZstdDecompressor::DecompressStreamed(
     absl::string_view compressed,
     absl::FunctionRef<absl::Span<char>(size_t size)> allocate_output) {
-  if (dstream_ == nullptr) {
-    dstream_.reset(ZSTD_createDStream());
-  }
   const size_t output_buffer_size = ZSTD_DStreamOutSize();
   struct OutputBuffer {
     std::unique_ptr<char[]> buffer;

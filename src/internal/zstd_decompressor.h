@@ -57,15 +57,9 @@ class ZstdDecompressor {
   struct DDictDeleter {
     void operator()(ZSTD_DDict* ptr) const { ZSTD_freeDDict(ptr); }
   };
-  struct DStreamDeleter {
-    void operator()(ZSTD_DStream* ptr) const { ZSTD_freeDStream(ptr); }
-  };
 
   std::unique_ptr<ZSTD_DCtx, DtxDeleter> ctx_;
   std::unique_ptr<ZSTD_DDict, DDictDeleter> cdict_;
-  std::unique_ptr<ZSTD_DStream, DStreamDeleter> dstream_;
-
-  std::unique_ptr<char[]> output_buffer_;
 };
 
 }  // namespace sackli::internal

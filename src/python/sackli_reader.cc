@@ -241,8 +241,12 @@ py::list ReadIndicesFromSlice(const SackliReader& reader, py::slice slice) {
   }
   std::vector<size_t> indices_vector;
   indices_vector.reserve(slicelength);
-  for (size_t i = start; i < stop; i += step) {
-    indices_vector.push_back(i);
+  ssize_t index = start;
+  for (ssize_t i = 0; i < slicelength; ++i) {
+    indices_vector.push_back(static_cast<size_t>(index));
+    if (i + 1 < slicelength) {
+      index += step;
+    }
   }
   return ReadIndicesFromSpan(reader, indices_vector);
 }
