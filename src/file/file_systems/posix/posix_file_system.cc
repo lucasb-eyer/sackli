@@ -407,15 +407,15 @@ class PosixBufferedFdPReadFile : public PReadFile {
     const size_t buffer_size =
         std::min({num_bytes, kPReadChunkSize,
                   static_cast<size_t>(std::numeric_limits<ssize_t>::max())});
-    std::string buffer(buffer_size, '\0');
+    const auto buffer = std::make_unique_for_overwrite<char[]>(buffer_size);
     size_t total_read = 0;
     while (total_read < num_bytes) {
       size_t remaining = num_bytes - total_read;
       size_t chunk_offset = offset + total_read;
-      size_t chunk_size = std::min(remaining, buffer.size());
+      size_t chunk_size = std::min(remaining, buffer_size);
       ssize_t bytes_read;
       do {
-        bytes_read = pread(fd_.get(), buffer.data(), chunk_size,
+        bytes_read = pread(fd_.get(), buffer.get(), chunk_size,
                            static_cast<off_t>(chunk_offset));
       } while (bytes_read < 0 && errno == EINTR);
       if (bytes_read < 0) {
@@ -428,7 +428,7 @@ class PosixBufferedFdPReadFile : public PReadFile {
       const size_t chunk_bytes = static_cast<size_t>(bytes_read);
       total_read += chunk_bytes;
       const bool continue_reading =
-          callback(absl::string_view(buffer.data(), chunk_bytes));
+          callback(absl::string_view(buffer.get(), chunk_bytes));
       if (drop_after_read_) {
         DropFileCache(fd_.get(), size_, chunk_offset, chunk_bytes);
       }
@@ -717,20 +717,22 @@ class PosixDirectPReadFile : public PReadFile {
     if (offset < direct_data_end) {
       const size_t aligned_begin = AlignDown(offset, read_align_);
       const size_t aligned_end = AlignUp(direct_data_end, read_align_);
+      // One buffer sized for the largest chunk serves all iterations.
+      const size_t buffer_size =
+          std::min(aligned_end - aligned_begin, max_chunk_size_);
+      absl::StatusOr<OwnedAlignedBuffer> buffer =
+          OwnedAlignedBuffer::Allocate(buffer_size, mem_align_);
+      if (!buffer.ok()) {
+        return buffer.status();
+      }
       for (size_t chunk_begin = aligned_begin; chunk_begin < aligned_end;
            chunk_begin += max_chunk_size_) {
         const size_t chunk_end =
             std::min(aligned_end, chunk_begin + max_chunk_size_);
         const size_t chunk_size = chunk_end - chunk_begin;
-        absl::StatusOr<OwnedAlignedBuffer> buffer =
-            OwnedAlignedBuffer::Allocate(chunk_size, mem_align_);
-        if (!buffer.ok()) {
-          return buffer.status();
-        }
         if (absl::Status status =
                 DirectPReadExact(fd_.get(), chunk_begin,
-                                 absl::Span<char>(buffer->data(),
-                                                  buffer->size()));
+                                 absl::Span<char>(buffer->data(), chunk_size));
             !status.ok()) {
           return status;
         }
@@ -738,7 +740,7 @@ class PosixDirectPReadFile : public PReadFile {
         const size_t piece_begin = std::max(offset, chunk_begin);
         const size_t piece_end = std::min(direct_data_end, chunk_end);
         if (piece_begin < piece_end &&
-            !callback(absl::string_view(buffer->data(), buffer->size())
+            !callback(absl::string_view(buffer->data(), chunk_size)
                           .substr(piece_begin - chunk_begin,
                                   piece_end - piece_begin))) {
           return absl::OkStatus();
