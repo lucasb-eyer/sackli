@@ -283,7 +283,10 @@ class Reader(Sequence[bytes]):
 
   @overload
   def __getitem__(self, index: int) -> bytes:
-    """Returns the record at the given index."""
+    """Returns the record at the given index.
+
+    Negative indices count from the end, like other Python sequences.
+    """
 
   @overload
   def __getitem__(self, slice: slice) -> Reader:

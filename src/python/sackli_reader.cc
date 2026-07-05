@@ -23,13 +23,16 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
+#include "absl/algorithm/container.h"
 #include "absl/base/no_destructor.h"
 #include "absl/cleanup/cleanup.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
@@ -177,6 +180,29 @@ py::list ReadIndicesFromSpan(const SackliReader& reader,
   return result;
 }
 
+// Resolves negative indices relative to `num_records`, like Python sequences
+// do. Indices that remain negative raise IndexError; indices that are too
+// large are left for the reader to reject with its own range error.
+std::vector<size_t> NormalizeNegativeIndices(absl::Span<const int64_t> indices,
+                                             size_t num_records) {
+  const int64_t size = static_cast<int64_t>(num_records);
+  std::vector<size_t> normalized;
+  normalized.reserve(indices.size());
+  for (size_t i = 0; i < indices.size(); ++i) {
+    int64_t index = indices[i];
+    if (index < 0) {
+      index += size;
+      if (index < 0) {
+        throw py::index_error(absl::StrCat("indices[", i, "] = ", indices[i],
+                                           " out of range [", -size, ", ",
+                                           size, ")"));
+      }
+    }
+    normalized.push_back(static_cast<size_t>(index));
+  }
+  return normalized;
+}
+
 template <typename Int64>
 py::list ReadIndicesFromNumpy(const SackliReader& reader,
                               py::array_t<Int64, py::array::c_style> indices) {
@@ -185,15 +211,23 @@ py::list ReadIndicesFromNumpy(const SackliReader& reader,
   if (indices.ndim() != 1) {
     throw std::invalid_argument("indices must be a 1D array");
   }
+  absl::Span<const Int64> span(indices.data(),
+                               static_cast<size_t>(indices.shape()[0]));
+  if constexpr (std::is_signed_v<Int64>) {
+    if (absl::c_any_of(span, [](Int64 index) { return index < 0; })) {
+      return ReadIndicesFromSpan(
+          reader, NormalizeNegativeIndices(span, reader.size()));
+    }
+  }
   return ReadIndicesFromSpan(
-      reader,
-      absl::MakeConstSpan(reinterpret_cast<const size_t*>(indices.data()),
-                          indices.shape()[0]));
+      reader, absl::MakeConstSpan(
+                  reinterpret_cast<const size_t*>(span.data()), span.size()));
 }
 
 py::list ReadIndicesFromIterable(const SackliReader& reader,
-                                 std::vector<size_t> indices) {
-  return ReadIndicesFromSpan(reader, indices);
+                                 std::vector<int64_t> indices) {
+  return ReadIndicesFromSpan(reader,
+                             NormalizeNegativeIndices(indices, reader.size()));
 }
 
 py::list ReadIndicesFromSlice(const SackliReader& reader, py::slice slice) {
@@ -215,14 +249,23 @@ py::list ReadIndicesFromSlice(const SackliReader& reader, py::slice slice) {
 
 constexpr char kGetItemDoc[] = R"(
 Returns the record at the given index.
+
+Negative indices count from the end, like other Python sequences.
 )";
 
-py::bytes GetItem(const SackliReader& reader, size_t index) {
+py::bytes GetItem(const SackliReader& reader, ssize_t index) {
+  const ssize_t size = static_cast<ssize_t>(reader.size());
+  const ssize_t adjusted = index < 0 ? index + size : index;
+  if (adjusted < 0 || adjusted >= size) {
+    throw py::index_error(absl::StrCat("index ", index, " out of range [",
+                                       -size, ", ", size, ")"));
+  }
   py::bytes result;
   {
     py::gil_scoped_release release;
     ThrowNonOkStatusAsException(reader.ReadWithAllocator(
-        index, [&result](ssize_t num_bytes) -> absl::Span<char> {
+        static_cast<size_t>(adjusted),
+        [&result](ssize_t num_bytes) -> absl::Span<char> {
           py::gil_scoped_acquire acquire;
           result = py::bytes(nullptr, num_bytes);
           char* bytes;
@@ -389,8 +432,11 @@ class ExceptionStore {
 // Helper to read batches of indices from a Python iterator.
 class PythonBatchIterator {
  public:
-  PythonBatchIterator(PyObject* indices_iter, ExceptionStore* exception_store)
-      : indices_iter_(indices_iter), exception_store_(exception_store) {}
+  PythonBatchIterator(PyObject* indices_iter, size_t num_records,
+                      ExceptionStore* exception_store)
+      : indices_iter_(indices_iter),
+        num_records_(num_records),
+        exception_store_(exception_store) {}
 
   // Takes up to read_ahead indices from indices_iter_ and returns them in
   // indices. Any exceptions are stored in exception_store.
@@ -422,21 +468,35 @@ class PythonBatchIterator {
           exception_store_->Store();
           return !indices.empty();
         }
-        size_t result_index = PyLong_AsLongLong(index_obj);
+        int64_t result_index = PyLong_AsLongLong(index_obj);
         Py_DECREF(index_obj);
-        if (result_index == size_t(-1)) {
+        if (result_index == -1) {
           if (PyErr_Occurred()) {
             exception_store_->Store();
             return !indices.empty();
           }
         }
-        indices.push_back(result_index);
+        const int64_t original_index = result_index;
+        if (result_index < 0) {
+          result_index += static_cast<int64_t>(num_records_);
+          if (result_index < 0) {
+            std::string message = absl::StrCat(
+                "index ", original_index, " out of range [",
+                -static_cast<int64_t>(num_records_), ", ",
+                num_records_, ")");
+            PyErr_SetString(PyExc_IndexError, message.c_str());
+            exception_store_->Store();
+            return !indices.empty();
+          }
+        }
+        indices.push_back(static_cast<size_t>(result_index));
       }
     }
     return true;
   }
 
   PyObject* indices_iter_;
+  size_t num_records_;
   ExceptionStore* exception_store_;
 };
 
@@ -458,10 +518,13 @@ class PythonIterator {
   PythonIterator(SackliReader reader, py::object index_iter,
                  std::optional<size_t> read_ahead)
       : exception_store_(std::make_unique<ExceptionStore>()),
-        index_iter_(std::move(index_iter)),
-        iterator_(std::make_unique<IteratorPyBytes>(
-            std::move(reader), read_ahead,
-            PythonBatchIterator(index_iter_.ptr(), exception_store_.get()))) {}
+        index_iter_(std::move(index_iter)) {
+    const size_t num_records = reader.size();
+    iterator_ = std::make_unique<IteratorPyBytes>(
+        std::move(reader), read_ahead,
+        PythonBatchIterator(index_iter_.ptr(), num_records,
+                            exception_store_.get()));
+  }
 
   PythonIterator(PythonIterator&&) = default;
   ~PythonIterator() {

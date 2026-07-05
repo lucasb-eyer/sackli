@@ -496,6 +496,45 @@ def test_sequence_methods(tmp_path: Path) -> None:
   assert list(reversed_reader) == list(reader)[::-1]
 
 
+def test_negative_indexing(tmp_path: Path) -> None:
+  file = tmp_path / 'data.bagz'
+  records = list(_generate_records(_NUM_RECORDS))
+  with sackli.Writer(file) as writer:
+    for record in records:
+      writer.write(record)
+
+  reader = sackli.Reader(file)
+
+  assert reader[-1] == records[-1]
+  assert reader[-len(records)] == records[0]
+  with pytest.raises(IndexError):
+    _ = reader[-len(records) - 1]
+  with pytest.raises(IndexError):
+    _ = reader[len(records)]
+
+  assert reader.read_indices([-1, 0, -len(records)]) == [
+      records[-1],
+      records[0],
+      records[0],
+  ]
+  assert reader.read_indices(np.array([-1, 3])) == [records[-1], records[3]]
+  assert list(reader.read_indices_iter([-1, 0, -len(records)])) == [
+      records[-1],
+      records[0],
+      records[0],
+  ]
+  with pytest.raises(IndexError):
+    _ = reader.read_indices([-len(records) - 1])
+  with pytest.raises(IndexError):
+    _ = reader.read_indices(np.array([-len(records) - 1]))
+  with pytest.raises(IndexError):
+    _ = list(reader.read_indices_iter([-len(records) - 1]))
+
+  # Negative indexing is relative to the sliced view, not the file.
+  sliced = reader[5:15]
+  assert sliced[-1] == records[14]
+
+
 def test_slice_reader(tmp_path: Path) -> None:
   file = tmp_path / 'data.bagz'
   records = list(_generate_records(_NUM_RECORDS))
