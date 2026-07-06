@@ -14,18 +14,41 @@
 
 #include <Python.h>
 
+#include <memory>
+
+#include "src/internal/thread_pool.h"
+#include "src/sackli_reader.h"
 #include "src/python/sackli_index.h"
 #include "src/python/sackli_multi_index.h"
 #include "src/python/sackli_options.h"
 #include "src/python/sackli_reader.h"
 #include "src/python/sackli_writer.h"
+#include "pybind11/gil.h"
 #include "pybind11/pybind11.h"
 
 namespace sackli {
 namespace {
 
+// Pins a Python thread state for the duration of a thread-pool task stint.
+// Without this, every record allocation on a pool worker creates and destroys
+// a PyThreadState (the cost of an outermost pybind11 gil_scoped_acquire on a
+// non-Python thread), which is prohibitively expensive on free-threading
+// builds. With the pin held, per-record acquisitions are plain GIL / thread
+// attach round-trips. Member order matters: acquire creates the thread state,
+// release detaches so record-level acquisitions work normally; destruction
+// re-attaches and then drops the thread state.
+struct PinnedPythonThreadState {
+  pybind11::gil_scoped_acquire acquire;
+  pybind11::gil_scoped_release release;
+};
+
+std::shared_ptr<void> MakePinnedPythonThreadState() {
+  return std::make_shared<PinnedPythonThreadState>();
+}
+
 PYBIND11_MODULE(sackli, m, pybind11::mod_gil_not_used()) {
   m.doc() = "Sackli Python Bindings";
+  internal::ThreadPool::SetTaskGuardFactory(&MakePinnedPythonThreadState);
   RegisterSackliIndex(m);
   RegisterSackliMultiIndex(m);
   RegisterSackliOptions(m);

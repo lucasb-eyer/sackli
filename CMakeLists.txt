@@ -107,6 +107,7 @@ sackli_cc_library(
     absl::statusor
     absl::flat_hash_map
     absl::log
+    absl::synchronization
     libzstd_static
 )
 

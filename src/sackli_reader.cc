@@ -14,6 +14,7 @@
 
 #include "src/sackli_reader.h"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -46,6 +47,7 @@
 #include "src/internal/records_limits.h"
 #include "src/internal/recycling_pool.h"
 #include "src/internal/shard_indexing.h"
+#include "src/internal/thread_pool.h"
 #include "src/internal/zstd_decompressor.h"
 #include "zstd.h"
 
@@ -351,7 +353,8 @@ struct SackliReader::State {
         shards_(std::move(shards)),
         shard_indexing_(
             std::move(accumulated_count),
-            options_.sharding_layout == ShardingLayout::kInterleaved) {
+            options_.sharding_layout == ShardingLayout::kInterleaved),
+        thread_pool_(options_.max_parallelism) {
     if (std::holds_alternative<CompressionZstd>(options_.compression)) {
       absl::string_view dictionary =
           std::get<CompressionZstd>(options_.compression).dictionary;
@@ -562,7 +565,7 @@ struct SackliReader::State {
       absl::FunctionRef<absl::Span<char>(size_t result_index,
                                          size_t record_size)>
           allocate_for_index) const {
-    return internal::ParallelDo(
+    return thread_pool_.ParallelDo(
         shard_ranges.size(),
         [&](size_t shard_index) -> absl::Status {
           const internal::ShardRange& shard_range = shard_ranges[shard_index];
@@ -587,13 +590,13 @@ struct SackliReader::State {
           status.Update(compress_status);
           return status;
         },
-        options_.max_parallelism,
-        /*cpu_bound=*/decompressor_factory_ != nullptr);
+        options_.max_parallelism);
   }
 
   Options options_;
   std::vector<internal::SackliShardReader> shards_;
   internal::ShardIndexing shard_indexing_;
+  mutable internal::ThreadPool thread_pool_;
   mutable internal::RecyclingPool<internal::ZstdDecompressor>
       decompressor_pool_;
   absl::AnyInvocable<internal::ZstdDecompressor() const> decompressor_factory_;
