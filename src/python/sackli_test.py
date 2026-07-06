@@ -491,9 +491,12 @@ def test_sequence_methods(tmp_path: Path) -> None:
   assert b'' in reader
   assert b'Missing' not in reader
 
-  reversed_reader = reversed(reader)
-  assert isinstance(reversed_reader, sackli.Reader)
-  assert list(reversed_reader) == list(reader)[::-1]
+  reversed_iter = reversed(reader)
+  assert next(reversed_iter) == records[-1]
+  assert list(reversed_iter) == list(reader)[::-1][1:]
+  # A reversed *view* is one slice away:
+  assert isinstance(reader[::-1], sackli.Reader)
+  assert list(reader[::-1]) == list(reader)[::-1]
 
 
 def test_error_mapping(tmp_path: Path) -> None:

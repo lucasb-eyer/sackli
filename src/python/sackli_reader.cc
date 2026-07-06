@@ -660,13 +660,12 @@ void RegisterSackliReader(py::module& m) {
       .def("__reversed__",
            [](const SackliReader& reader) {
              if (reader.size() == 0) {
-               return reader;
-             } else {
-               auto reverse_reader =
-                   reader.Slice(reader.size() - 1, -1, reader.size());
-               internal::ThrowIfNotOk(reverse_reader.status());
-               return *std::move(reverse_reader);
+               return PythonIterator(reader, std::nullopt);
              }
+             auto reverse_reader =
+                 reader.Slice(reader.size() - 1, -1, reader.size());
+             internal::ThrowIfNotOk(reverse_reader.status());
+             return PythonIterator(*std::move(reverse_reader), std::nullopt);
            })
       .def("approximate_bytes_per_record",
            &SackliReader::ApproximateNumBytesPerRecord)
