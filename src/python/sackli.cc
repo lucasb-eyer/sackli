@@ -17,7 +17,6 @@
 #include <memory>
 
 #include "src/internal/thread_pool.h"
-#include "src/sackli_reader.h"
 #include "src/python/sackli_index.h"
 #include "src/python/sackli_multi_index.h"
 #include "src/python/sackli_options.h"
@@ -49,17 +48,17 @@ std::shared_ptr<void> MakePinnedPythonThreadState() {
 PYBIND11_MODULE(sackli, m, pybind11::mod_gil_not_used()) {
   m.doc() = "Sackli Python Bindings";
   internal::ThreadPool::SetTaskGuardFactory(&MakePinnedPythonThreadState);
-  // With the GIL enabled, per-record allocations serialize worker threads,
-  // so contiguous reads must not be split across threads.
-  bool callbacks_scale = false;
+  // With the GIL enabled, per-record bytes allocation from worker threads
+  // would serialize parallel reads; buffer records in C++ instead.
+  bool gil_enabled = true;
   try {
-    callbacks_scale = !pybind11::module_::import("sys")
-                           .attr("_is_gil_enabled")()
-                           .cast<bool>();
+    gil_enabled = pybind11::module_::import("sys")
+                      .attr("_is_gil_enabled")()
+                      .cast<bool>();
   } catch (const pybind11::error_already_set&) {
     // No sys._is_gil_enabled (< 3.13): the GIL is always enabled.
   }
-  SackliReader::SetCallbackConcurrencyHint(callbacks_scale);
+  SetUseBufferedRecords(gil_enabled);
   RegisterSackliIndex(m);
   RegisterSackliMultiIndex(m);
   RegisterSackliOptions(m);

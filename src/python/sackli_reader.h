@@ -22,6 +22,14 @@ namespace sackli {
 
 void RegisterSackliReader(pybind11::module& m);
 
+// Selects the buffered-record strategy for batch reads and iteration:
+// workers read into plain C++ buffers which are converted to bytes under a
+// single GIL hold afterwards (one extra copy per record). Enable on
+// GIL-enabled interpreters, where per-record bytes allocation from worker
+// threads would serialize on the GIL; keep disabled on free-threading
+// builds, which write into bytes objects zero-copy.
+void SetUseBufferedRecords(bool use_buffered);
+
 }  // namespace sackli
 
 #endif  // SACKLI_SRC_PYTHON_SACKLI_READER_H_

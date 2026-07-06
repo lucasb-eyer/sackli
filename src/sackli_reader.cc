@@ -14,7 +14,6 @@
 
 #include "src/sackli_reader.h"
 
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -53,9 +52,6 @@
 
 namespace sackli {
 namespace {
-
-// See SackliReader::SetCallbackConcurrencyHint.
-std::atomic<bool> callback_concurrency_hint{true};
 
 struct ReaderOpenHandles {
   std::unique_ptr<PReadFile> records;
@@ -592,12 +588,9 @@ struct SackliReader::State {
     // A contiguous read maps to one range per shard, which would otherwise
     // serialize the whole read (including decompression) on one thread.
     // Split large ranges so the full parallelism can be used, but keep tasks
-    // large enough that the per-task limits read stays negligible. Skip the
-    // split when allocation callbacks do not scale across threads (GIL):
-    // contended workers are slower than one thread there.
+    // large enough that the per-task limits read stays negligible.
     std::vector<internal::ShardRange> split_ranges;
-    if (options_.max_parallelism > 1 && !shard_ranges.empty() &&
-        callback_concurrency_hint.load(std::memory_order_relaxed)) {
+    if (options_.max_parallelism > 1 && !shard_ranges.empty()) {
       constexpr size_t kMinRecordsPerTask = 32;
       size_t total_records = 0;
       for (const internal::ShardRange& range : shard_ranges) {
@@ -866,11 +859,6 @@ absl::Status SackliReader::ReadIndicesWithAllocator(
   }
   return state_->ReadIndicesWithAllocator(indices, allocate_for_index,
                                           copy_result);
-}
-
-void SackliReader::SetCallbackConcurrencyHint(bool scales_across_threads) {
-  callback_concurrency_hint.store(scales_across_threads,
-                                  std::memory_order_relaxed);
 }
 
 absl::StatusOr<SackliReader> SackliReader::Open(absl::string_view filespec,

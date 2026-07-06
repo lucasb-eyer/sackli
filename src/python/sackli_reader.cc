@@ -17,6 +17,7 @@
 #include <Python.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -25,9 +26,11 @@
 #include <string>
 #include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "absl/algorithm/container.h"
+#include "absl/container/flat_hash_map.h"
 #include "absl/base/no_destructor.h"
 #include "absl/cleanup/cleanup.h"
 #include "absl/status/status.h"
@@ -104,6 +107,100 @@ py::list MoveIntoList(std::vector<py::object>& results) {
     // The new list's slots start out empty; SET_ITEM steals the reference.
     PyList_SET_ITEM(list.ptr(), static_cast<ssize_t>(i),
                     results[i].release().ptr());
+  }
+  return list;
+}
+
+// On GIL builds, per-record bytes allocation from worker threads serializes
+// on the GIL, making parallel reads slower than serial ones. There, workers
+// read into plain C++ buffers instead (no GIL per record) and the results
+// are converted to bytes in one pass under a single GIL hold, at the cost of
+// one extra copy per record. Free-threading builds keep the zero-copy path
+// above. Set once at module initialization.
+std::atomic<bool> use_buffered_records{false};
+
+// Whether `reader` should use buffered records: only worthwhile when worker
+// threads are in play; serial readers keep the zero-copy path since the
+// extra copy buys them nothing.
+bool UseBufferedRecords(const SackliReader& reader) {
+  return use_buffered_records.load(std::memory_order_relaxed) &&
+         !reader.IsClosed() && reader.options().max_parallelism > 1;
+}
+
+// One record read into a plain C++ buffer. The buffer is shared so that
+// duplicated indices can alias it cheaply.
+struct RawRecord {
+  std::shared_ptr<char[]> data;
+  size_t size = 0;
+};
+
+RawRecord MakeRawRecordOfSize(size_t num_bytes) {
+  return RawRecord{
+      num_bytes > 0 ? std::make_shared_for_overwrite<char[]>(num_bytes)
+                    : nullptr,
+      num_bytes};
+}
+
+// Counterpart of IndexedAllocator/IndexedCopy for RawRecords; runs entirely
+// without the GIL.
+class RawIndexedAllocator {
+ public:
+  explicit RawIndexedAllocator(std::vector<RawRecord>& results)
+      : results_(results) {}
+
+  absl::Span<char> operator()(size_t result_index, size_t num_bytes) const {
+    RawRecord& record = results_[result_index] = MakeRawRecordOfSize(num_bytes);
+    return absl::Span<char>(record.data.get(), record.size);
+  }
+
+ private:
+  std::vector<RawRecord>& results_;
+};
+
+class RawIndexedCopy {
+ public:
+  explicit RawIndexedCopy(std::vector<RawRecord>& results)
+      : results_(results) {}
+
+  void operator()(size_t from_index, size_t to_index) const {
+    results_[to_index] = results_[from_index];
+  }
+
+ private:
+  std::vector<RawRecord>& results_;
+};
+
+py::bytes RawRecordToBytes(const RawRecord& record) {
+  PyObject* bytes = PyBytes_FromStringAndSize(
+      record.data.get(), static_cast<ssize_t>(record.size));
+  if (bytes == nullptr) {
+    throw py::error_already_set();
+  }
+  return py::reinterpret_steal<py::bytes>(bytes);
+}
+
+// Converts raw records to a py::list of bytes. Must be called with the GIL
+// held. Records aliasing the same buffer (duplicated indices) become the
+// same bytes object, matching the zero-copy path.
+py::list RawRecordsToList(absl::Span<const RawRecord> records) {
+  py::list list(records.size());
+  absl::flat_hash_map<const char*, PyObject*> aliased;
+  for (size_t i = 0; i < records.size(); ++i) {
+    const RawRecord& record = records[i];
+    PyObject* bytes;
+    if (record.data != nullptr && record.data.use_count() > 1) {
+      auto [it, inserted] = aliased.try_emplace(record.data.get(), nullptr);
+      if (!inserted) {
+        bytes = it->second;
+        Py_INCREF(bytes);
+      } else {
+        bytes = RawRecordToBytes(record).release().ptr();
+        it->second = bytes;
+      }
+    } else {
+      bytes = RawRecordToBytes(record).release().ptr();
+    }
+    PyList_SET_ITEM(list.ptr(), static_cast<ssize_t>(i), bytes);
   }
   return list;
 }
@@ -212,6 +309,15 @@ Returns all the records in the range [start, start + num_records).
 
 py::list ReadRange(const SackliReader& reader, size_t start, size_t num_records) {
   EnsureOpen(reader);
+  if (UseBufferedRecords(reader)) {
+    std::vector<RawRecord> results(num_records);
+    {
+      py::gil_scoped_release release;
+      internal::ThrowIfNotOk(reader.ReadRangeWithAllocator(
+          start, num_records, RawIndexedAllocator(results)));
+    }
+    return RawRecordsToList(results);
+  }
   std::vector<py::object> results(num_records);
   {
     py::gil_scoped_release release;
@@ -228,6 +334,15 @@ Returns the records at the given indices.
 py::list ReadIndicesFromSpan(const SackliReader& reader,
                              absl::Span<const size_t> indices) {
   EnsureOpen(reader);
+  if (UseBufferedRecords(reader)) {
+    std::vector<RawRecord> results(indices.size());
+    {
+      py::gil_scoped_release release;
+      internal::ThrowIfNotOk(reader.ReadIndicesWithAllocator(
+          indices, RawIndexedAllocator(results), RawIndexedCopy(results)));
+    }
+    return RawRecordsToList(results);
+  }
   std::vector<py::object> results(indices.size());
   {
     py::gil_scoped_release release;
@@ -568,27 +683,44 @@ class PythonBatchIterator {
   ExceptionStore* exception_store_;
 };
 
+// Read-ahead helpers for RawRecords; run entirely without the GIL.
+struct MakeRawRecord {
+  RawRecord operator()(size_t num_bytes) const {
+    return MakeRawRecordOfSize(num_bytes);
+  }
+};
+
+struct SpanFromRawRecord {
+  absl::Span<char> operator()(const RawRecord& record) const {
+    return absl::Span<char>(record.data.get(), record.size);
+  }
+};
+
 class PythonIterator {
  public:
-  // Iterator that returns py::bytes. Ensures GIL is held when creating/copying
-  // py::bytes objects.
+  // Iterator that returns py::bytes zero-copy. Ensures the GIL is held when
+  // creating/copying py::bytes objects; used on free-threading builds.
   using IteratorPyBytes =
       SackliIterator<MakeBytes, SpanFromBytes,
                    decltype([] { return py::gil_scoped_acquire(); })>;
+  // Iterator over plain C++ buffers, converted to bytes in next(); used on
+  // GIL builds where per-record GIL acquisition from worker threads would
+  // serialize the read-ahead. See UseBufferedRecords().
+  using IteratorRawRecord =
+      SackliIterator<MakeRawRecord, SpanFromRawRecord, internal::NoOpEditGuard>;
 
   // Iterator that reads all records in the reader sequentially.
   PythonIterator(SackliReader reader, std::optional<size_t> read_ahead)
-      : iterator_(
-            std::make_unique<IteratorPyBytes>(std::move(reader), read_ahead)) {}
+      : iterator_(MakeIterator(std::move(reader), read_ahead, {})) {}
 
-  // Iterator that reads records in the reader according to the sequence if
+  // Iterator that reads records in the reader according to the sequence of
   // indices returned by index_iter.
   PythonIterator(SackliReader reader, py::object index_iter,
                  std::optional<size_t> read_ahead)
       : exception_store_(std::make_unique<ExceptionStore>()),
         index_iter_(std::move(index_iter)) {
     const size_t num_records = reader.size();
-    iterator_ = std::make_unique<IteratorPyBytes>(
+    iterator_ = MakeIterator(
         std::move(reader), read_ahead,
         PythonBatchIterator(index_iter_.ptr(), num_records,
                             exception_store_.get()));
@@ -596,15 +728,45 @@ class PythonIterator {
 
   PythonIterator(PythonIterator&&) = default;
   ~PythonIterator() {
-    if (iterator_ != nullptr) {
-      py::gil_scoped_release release;
-      iterator_ = nullptr;
-    }
+    py::gil_scoped_release release;
+    iterator_ = {};
   }
 
   py::bytes next() {
+    if (auto* raw = std::get_if<std::unique_ptr<IteratorRawRecord>>(
+            &iterator_)) {
+      std::optional<absl::StatusOr<RawRecord>> result;
+      {
+        py::gil_scoped_release release;
+        result = (*raw)->next();
+      }
+      return RawRecordToBytes(Unwrap(std::move(result)));
+    }
+    auto& iterator = std::get<std::unique_ptr<IteratorPyBytes>>(iterator_);
     py::gil_scoped_release release;
-    std::optional<absl::StatusOr<py::bytes>> result = iterator_->next();
+    return Unwrap(iterator->next());
+  }
+
+ private:
+  using IteratorVariant = std::variant<std::unique_ptr<IteratorPyBytes>,
+                                       std::unique_ptr<IteratorRawRecord>>;
+
+  static IteratorVariant MakeIterator(SackliReader reader,
+                                      std::optional<size_t> read_ahead,
+                                      SequenceReadBatch read_batch) {
+    if (UseBufferedRecords(reader)) {
+      return std::make_unique<IteratorRawRecord>(std::move(reader), read_ahead,
+                                                 std::move(read_batch));
+    }
+    return std::make_unique<IteratorPyBytes>(std::move(reader), read_ahead,
+                                             std::move(read_batch));
+  }
+
+  // Turns the underlying iterator's result into a value or the fitting
+  // exception. Works with or without the GIL held; the exception paths
+  // acquire it as needed.
+  template <typename T>
+  T Unwrap(std::optional<absl::StatusOr<T>> result) {
     if (!result.has_value()) {
       if (exception_store_ != nullptr && exception_store_->HasException()) {
         py::gil_scoped_acquire acquire;
@@ -629,15 +791,18 @@ class PythonIterator {
     return *std::move(*result);
   }
 
- private:
   // Ensure exception_store_ address is valid if iterator is moved.
   // Can be Nullptr if no exception store is needed.
   std::unique_ptr<ExceptionStore> exception_store_;
   py::object index_iter_;
-  std::unique_ptr<IteratorPyBytes> iterator_;
+  IteratorVariant iterator_;
 };
 
 }  // namespace
+
+void SetUseBufferedRecords(bool use_buffered) {
+  use_buffered_records.store(use_buffered, std::memory_order_relaxed);
+}
 
 void RegisterSackliReader(py::module& m) {
   auto register_sequence =
