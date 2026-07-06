@@ -40,6 +40,7 @@
 #include "src/sackli_iterator.h"
 #include "src/sackli_options.h"
 #include "src/python/option_conversions.h"
+#include "src/python/status_to_exception.h"
 #include "pybind11/attr.h"
 #include "pybind11/cast.h"
 #include "pybind11/gil.h"
@@ -52,15 +53,6 @@ namespace sackli {
 namespace {
 
 namespace py = pybind11;
-
-class FileNotFoundError : public py::builtin_exception {
- public:
-  using py::builtin_exception::builtin_exception;
-
-  void set_error() const override {
-    PyErr_SetString(PyExc_FileNotFoundError, what());
-  }
-};
 
 // Helper class to allocate results for callback-based reads.
 //
@@ -114,17 +106,6 @@ py::list MoveIntoList(std::vector<py::object>& results) {
                     results[i].release().ptr());
   }
   return list;
-}
-
-void ThrowNonOkStatusAsException(const absl::Status& status) {
-  if (!status.ok()) {
-    if (absl::IsOutOfRange(status)) {
-      throw py::index_error(std::string(status.message()));
-    } else if (absl::IsNotFound(status)) {
-      throw FileNotFoundError(status.ToString());
-    }
-    throw std::invalid_argument(status.ToString());
-  }
 }
 
 constexpr char kOptionsDoc[] = R"(
@@ -195,7 +176,7 @@ SackliReader Init(py::object file_spec_obj, const SackliReader::Options& options
   {
     py::gil_scoped_release release_gil;
     absl::StatusOr<SackliReader> reader = SackliReader::Open(file_spec, options);
-    ThrowNonOkStatusAsException(reader.status());
+    internal::ThrowIfNotOk(reader.status());
     return *std::move(reader);
   }
 }
@@ -208,7 +189,7 @@ py::list ReadRange(const SackliReader& reader, size_t start, size_t num_records)
   std::vector<py::object> results(num_records);
   {
     py::gil_scoped_release release;
-    ThrowNonOkStatusAsException(reader.ReadRangeWithAllocator(
+    internal::ThrowIfNotOk(reader.ReadRangeWithAllocator(
         start, num_records, IndexedAllocator(results)));
   }
   return MoveIntoList(results);
@@ -223,7 +204,7 @@ py::list ReadIndicesFromSpan(const SackliReader& reader,
   std::vector<py::object> results(indices.size());
   {
     py::gil_scoped_release release;
-    ThrowNonOkStatusAsException(reader.ReadIndicesWithAllocator(
+    internal::ThrowIfNotOk(reader.ReadIndicesWithAllocator(
         indices, IndexedAllocator(results), IndexedCopy(results)));
   }
   return MoveIntoList(results);
@@ -316,7 +297,7 @@ py::bytes GetItem(const SackliReader& reader, ssize_t index) {
   py::bytes result;
   {
     py::gil_scoped_release release;
-    ThrowNonOkStatusAsException(reader.ReadWithAllocator(
+    internal::ThrowIfNotOk(reader.ReadWithAllocator(
         static_cast<size_t>(adjusted),
         [&result](ssize_t num_bytes) -> absl::Span<char> {
           py::gil_scoped_acquire acquire;
@@ -336,7 +317,7 @@ SackliReader GetSlice(const SackliReader& reader, py::slice slice) {
     throw py::index_error("Invalid slice");
   }
   auto reader_slice = reader.Slice(start, step, slicelength);
-  ThrowNonOkStatusAsException(reader_slice.status());
+  internal::ThrowIfNotOk(reader_slice.status());
   return *std::move(reader_slice);
 }
 
@@ -354,7 +335,7 @@ bool AnyOf(SackliReader reader, CallBack&& callback) {
     if (!result.has_value()) {
       return false;
     }
-    ThrowNonOkStatusAsException(result->status());
+    internal::ThrowIfNotOk(result->status());
     if (callback(**result)) {
       return true;
     }
@@ -394,7 +375,7 @@ size_t IndexOf(const SackliReader& reader, py::bytes value, ssize_t start,
   }
   size_t index = start;
   auto reader_slice = reader.Slice(start, 1, stop_index - start);
-  ThrowNonOkStatusAsException(reader_slice.status());
+  internal::ThrowIfNotOk(reader_slice.status());
   if (!AnyOf(*std::move(reader_slice),
              [bytes, &index](absl::string_view record) {
                if (record == bytes) {
@@ -609,7 +590,7 @@ class PythonIterator {
           }
         }
       }
-      ThrowNonOkStatusAsException(result->status());
+      internal::ThrowIfNotOk(result->status());
     }
     return *std::move(*result);
   }
@@ -676,7 +657,7 @@ void RegisterSackliReader(py::module& m) {
              } else {
                auto reverse_reader =
                    reader.Slice(reader.size() - 1, -1, reader.size());
-               ThrowNonOkStatusAsException(reverse_reader.status());
+               internal::ThrowIfNotOk(reverse_reader.status());
                return *std::move(reverse_reader);
              }
            })
@@ -692,7 +673,7 @@ void RegisterSackliReader(py::module& m) {
              std::size_t num_records,
              std::optional<size_t> read_ahead = std::nullopt) {
             auto reader_slice = reader.Slice(start, 1, num_records);
-            ThrowNonOkStatusAsException(reader_slice.status());
+            internal::ThrowIfNotOk(reader_slice.status());
             return PythonIterator(*std::move(reader_slice), read_ahead);
           },
           py::arg("start"), py::arg("num_records"), py::kw_only(),

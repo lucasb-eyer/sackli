@@ -496,6 +496,31 @@ def test_sequence_methods(tmp_path: Path) -> None:
   assert list(reversed_reader) == list(reader)[::-1]
 
 
+def test_error_mapping(tmp_path: Path) -> None:
+  file = tmp_path / 'data.bagz'
+  with sackli.Writer(file) as writer:
+    writer.write(b'x')
+
+  with pytest.raises(FileNotFoundError):
+    sackli.Reader(tmp_path / 'missing.bagz')
+  with pytest.raises(FileNotFoundError):
+    sackli.Writer(tmp_path / 'no_such_dir' / 'data.bagz')
+
+  if os.geteuid() != 0:
+    os.chmod(file, 0)
+    try:
+      with pytest.raises(PermissionError):
+        sackli.Reader(file)
+    finally:
+      os.chmod(file, 0o644)
+
+  # Using a closed writer raises ValueError, like closed Python files.
+  writer = sackli.Writer(tmp_path / 'closed.bag')
+  writer.close()
+  with pytest.raises(ValueError):
+    writer.write(b'x')
+
+
 def test_options_kwargs_and_strings(tmp_path: Path) -> None:
   file = tmp_path / 'data.bagz'
   records = list(_generate_records(_NUM_RECORDS))

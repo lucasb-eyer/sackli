@@ -27,6 +27,7 @@
 #include "src/sackli_options.h"
 #include "src/sackli_writer.h"
 #include "src/python/option_conversions.h"
+#include "src/python/status_to_exception.h"
 #include "pybind11/attr.h"
 #include "pybind11/cast.h"
 #include "pybind11/gil.h"
@@ -169,7 +170,7 @@ void RegisterSackliWriter(pybind11::module& m) {
                    absl::StatusOr<SackliWriter> writer =
                        SackliWriter::OpenFile(filename, merged);
                    if (!writer.ok()) {
-                     throw std::invalid_argument(writer.status().ToString());
+                     internal::ThrowStatusAsPyException(writer.status());
                    }
                    return *std::move(writer);
                  }
@@ -181,37 +182,28 @@ void RegisterSackliWriter(pybind11::module& m) {
           "__exit__",
           [](SackliWriter& self, py::handle exc_type, py::handle exc_value,
              py::handle traceback) {
-            absl::Status status = self.Close();
-            if (!status.ok()) {
-              throw std::invalid_argument(status.ToString());
-            }
+            internal::ThrowIfNotOk(self.Close());
           },
           py::arg("exc_type"), py::arg("exc_value"), py::arg("traceback"),
           py::call_guard<py::gil_scoped_release>())
       .def(
           "write",
           [](SackliWriter* writer, absl::string_view record) {
-            if (absl::Status status = writer->Write(record); !status.ok()) {
-              throw std::invalid_argument(status.ToString());
-            }
+            internal::ThrowIfNotOk(writer->Write(record));
           },
           py::arg("record"), py::call_guard<py::gil_scoped_release>(),
           py::doc(kWriterWriteDoc + 1))
       .def(
           "close",
           [](SackliWriter* writer) {
-            if (absl::Status status = writer->Close(); !status.ok()) {
-              throw std::invalid_argument(status.ToString());
-            }
+            internal::ThrowIfNotOk(writer->Close());
           },
           py::call_guard<py::gil_scoped_release>(),
           py::doc(kWriterCloseDoc + 1))
       .def(
           "flush",
           [](SackliWriter* writer) {
-            if (absl::Status status = writer->Flush(); !status.ok()) {
-              throw std::invalid_argument(status.ToString());
-            }
+            internal::ThrowIfNotOk(writer->Flush());
           },
           py::call_guard<py::gil_scoped_release>(),
           py::doc(kWriterFlushDoc + 1));

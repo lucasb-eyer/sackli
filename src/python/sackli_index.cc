@@ -25,6 +25,7 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 #include "src/sackli_reader.h"
+#include "src/python/status_to_exception.h"
 #include "pybind11/cast.h"
 #include "pybind11/gil.h"
 #include "pybind11/pybind11.h"
@@ -83,7 +84,7 @@ void RegisterSackliIndex(py::module& m) {
                  index.ok()) {
                return *std::move(index);
              } else {
-               throw std::invalid_argument(index.status().ToString());
+               internal::ThrowStatusAsPyException(index.status());
              }
            }),
            py::arg("reader"), py::doc(kInitDoc + 1),
