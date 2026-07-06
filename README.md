@@ -217,6 +217,14 @@ accept the case-insensitive name of an enum value (e.g. `'random'`,
         page-aligned starting point derived from file/filesystem metadata.
         For the unaligned tail, it does a one-time standard read at init.
 *   `max_parallelism`: Default number of threads when reading many records.
+*   `read_ahead_bytes`: Byte budget that sizes the record batches the
+    iterators read ahead (default 1 MiB). For compressed files, the budget
+    counts compressed on-disk bytes; decompressed records can require
+    substantially more RAM, especially for high compression ratios or large
+    records. The double-buffered iterator can hold up to two batches in
+    flight, so this is a sizing heuristic rather than a memory bound. The
+    `read_ahead` argument of `read_indices_iter`/`read_range_iter`, which
+    counts records, takes precedence when given.
 *   `sharding_layout`: Can be one of:
     *   `sackli.ShardingLayout.CONCATENATED`: Default - See [Sharding](#sharding)
     *   `sackli.ShardingLayout.INTERLEAVED`: See [Sharding](#sharding)

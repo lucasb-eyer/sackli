@@ -130,8 +130,12 @@ Args:
   cache_policy: Policy for how aggressively to retain record data in the local
     page cache or avoid it.
   read_ahead_bytes: Byte budget that sizes the record batches read ahead when
-    iterating (defaults to 1 MiB). The `read_ahead` argument of the iterator
-    methods, which counts records, takes precedence when given.
+    iterating (defaults to 1 MiB). For compressed files, the budget counts
+    compressed on-disk bytes; decompressed records can require substantially
+    more RAM, especially for high compression ratios or large records. Up to
+    two batches can be in flight, so this is a sizing heuristic rather than a
+    memory bound. The `read_ahead` argument of the iterator methods, which
+    counts records, takes precedence when given.
 )";
 
 constexpr char kInitDoc[] = R"(

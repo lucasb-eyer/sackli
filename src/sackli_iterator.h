@@ -45,7 +45,9 @@ using SequenceReadBatch = absl::AnyInvocable<bool(
 //
 // The iterator reads records in batches of size `read_ahead` if specified,
 // otherwise an estimate of the number of records based on read_ahead_bytes
-// setting in `sackli::Reader::Options`. The records are read in parallel.
+// setting in `sackli::Reader::Options`. That setting is an on-disk byte
+// budget (compressed bytes for compressed files), not a bound on decompressed
+// memory. The records are read in parallel.
 //
 // The iterator buffers the records in a vector in reverse order so they can be
 // moved out of the buffer efficiently.
