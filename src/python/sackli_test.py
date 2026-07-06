@@ -564,6 +564,12 @@ def test_options_kwargs_and_strings(tmp_path: Path) -> None:
   sep_reader = sackli.Reader(tmp_path / 'sep.bag', limits_placement='separate')
   assert sep_reader[0] == records[0]
 
+  # read_ahead_bytes sizes the iterator's read-ahead batches.
+  options = sackli.Reader.Options(read_ahead_bytes=1024)
+  assert options.read_ahead_bytes == 1024
+  small_batches = sackli.Reader(file, read_ahead_bytes=1024)
+  assert list(small_batches) == records
+
 
 def test_negative_indexing(tmp_path: Path) -> None:
   file = tmp_path / 'data.bagz'

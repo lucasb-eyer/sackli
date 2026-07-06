@@ -129,6 +129,9 @@ Args:
     files.
   cache_policy: Policy for how aggressively to retain record data in the local
     page cache or avoid it.
+  read_ahead_bytes: Byte budget that sizes the record batches read ahead when
+    iterating (defaults to 1 MiB). The `read_ahead` argument of the iterator
+    methods, which counts records, takes precedence when given.
 )";
 
 constexpr char kInitDoc[] = R"(
@@ -163,6 +166,8 @@ void ApplyReaderOptionKwarg(SackliReader::Options& options,
     options.access_pattern = internal::ToOptionEnum<AccessPattern>(value);
   } else if (key == "cache_policy") {
     options.cache_policy = internal::ToOptionEnum<CachePolicy>(value);
+  } else if (key == "read_ahead_bytes") {
+    options.read_ahead_bytes = py::cast<std::optional<size_t>>(value);
   } else {
     throw py::type_error(
         absl::StrCat("got an unexpected keyword argument '", key, "'"));
@@ -631,7 +636,9 @@ void RegisterSackliReader(py::module& m) {
       .def_readwrite("limits_storage", &SackliReader::Options::limits_storage)
       .def_readwrite("max_parallelism", &SackliReader::Options::max_parallelism)
       .def_readwrite("access_pattern", &SackliReader::Options::access_pattern)
-      .def_readwrite("cache_policy", &SackliReader::Options::cache_policy);
+      .def_readwrite("cache_policy", &SackliReader::Options::cache_policy)
+      .def_readwrite("read_ahead_bytes",
+                     &SackliReader::Options::read_ahead_bytes);
 
   reader
       .def(py::init([](py::object file_spec,

@@ -191,6 +191,7 @@ class Reader(Sequence[bytes]):
     limits_placement: LimitsPlacement
     limits_storage: LimitsStorage
     max_parallelism: int
+    read_ahead_bytes: int | None
     sharding_layout: ShardingLayout
     def __init__(
         self,
@@ -202,6 +203,7 @@ class Reader(Sequence[bytes]):
         max_parallelism: int = ...,
         access_pattern: AccessPattern | str = ...,
         cache_policy: CachePolicy | str = ...,
+        read_ahead_bytes: int | None = ...,
     ) -> None:
       """Options for creating the sackli.Reader.
 
@@ -222,6 +224,7 @@ class Reader(Sequence[bytes]):
       max_parallelism: int = ...,
       access_pattern: AccessPattern | str = ...,
       cache_policy: CachePolicy | str = ...,
+      read_ahead_bytes: int | None = ...,
   ) -> None:
     """Opens a collection of Sackli-formatted files (shards).
 
