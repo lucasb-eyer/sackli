@@ -39,6 +39,7 @@
 #include "src/file/file_system/write_file.h"
 #include "src/file/file_systems/posix/posix_file_system.h"
 #include "src/file/registry/file_system_registry.h"
+#include "src/sackli_record_scan.h"
 
 namespace sackli {
 namespace {
@@ -765,6 +766,44 @@ bool TestReaderReadsShardedDirectIoFilesIfSupported() {
                 "reader-direct-sharded: last record mismatch");
 }
 
+bool TestScanRecordsAllowsSingleRecordBatches() {
+  const std::vector<absl::string_view> records = {
+      "alpha",
+      "bravo",
+      "charlie",
+  };
+  TempFile temp_file = MakeTempFile("sackli-scan-records-small-batches");
+  if (!WritePayload(temp_file, MakeTailBag(records), "scan-records")) {
+    return false;
+  }
+
+  absl::StatusOr<SackliReader> reader = SackliReader::Open(
+      temp_file.path, SackliReader::Options{.compression = CompressionNone{}});
+  if (!Expect(reader.ok(),
+              absl::StrCat("scan-records: open failed: ",
+                           reader.status().message()))) {
+    return false;
+  }
+
+  std::vector<size_t> batch_starts;
+  std::vector<size_t> batch_sizes;
+  absl::Status status = internal::ScanRecords(
+      *reader, /*batch_bytes=*/1,
+      [&](size_t start_index, absl::Span<std::string> batch) {
+        batch_starts.push_back(start_index);
+        batch_sizes.push_back(batch.size());
+      });
+  if (!Expect(status.ok(), "scan-records: ScanRecords failed")) {
+    return false;
+  }
+  const std::vector<size_t> expected_starts = {0, 1, 2};
+  const std::vector<size_t> expected_sizes = {1, 1, 1};
+  return Expect(batch_starts == expected_starts,
+                "scan-records: wrong batch starts") &&
+         Expect(batch_sizes == expected_sizes,
+                "scan-records: wrong batch sizes");
+}
+
 }  // namespace
 
 int RunTests() {
@@ -782,7 +821,8 @@ int RunTests() {
                   TestPosixDirectBackendReadsSmallFilesIfSupported() &&
                   TestPosixDirectBackendReadsAcrossTailBoundaryIfSupported() &&
                   TestPosixDirectBackendHonorsEarlyStopIfSupported() &&
-                  TestReaderReadsShardedDirectIoFilesIfSupported();
+                  TestReaderReadsShardedDirectIoFilesIfSupported() &&
+                  TestScanRecordsAllowsSingleRecordBatches();
   return ok ? 0 : 1;
 }
 

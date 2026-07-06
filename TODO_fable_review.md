@@ -9,7 +9,8 @@ length; negative indexing; per-record decompressor-pool round-trips;
 allocation churn in the POSIX no-cache read paths; persistent thread pool
 (replacing thread-spawn-per-call); per-task-stint PyThreadState pinning;
 shared-py::list contention fix; contiguous-read splitting (free-threading
-builds); assorted dead-code/README nits.
+builds); streamed Index/MultiIndex construction; assorted
+dead-code/README nits.
 
 Headline numbers after the fixes (100k records, page-cached, 8 cores,
 free-threading build): compressed single-shard `read()` 0.13s -> 0.033s,
@@ -29,19 +30,17 @@ acquisition per task stint (one extra memcpy per record). The task-guard hook
 in `internal::ThreadPool` is the natural attachment point. Free-threading
 builds should keep the current zero-copy path.
 
-- Also possible now that threads persist: cross-call read-buffer pooling /
-  thread_local buffers in `PosixBufferedFdPReadFile` / `PosixDirectPReadFile`
-  to remove the remaining one-malloc-per-PRead.
-
-### 2. `MultiIndex::Create` materializes the whole dataset
-`src/sackli_multi_index.cc:32` reads everything into a `vector<string>` before
-moving into the hash map — transient ~2x dataset RAM. Streaming in range
-batches via `ReadRangeWithAllocator` would halve peak memory (matters for a
-keys bag with billions of entries).
+- Ruled out (measured 2026-07-06): thread_local scratch buffers in
+  `PosixBufferedFdPReadFile` / `PosixDirectPReadFile` to remove the remaining
+  one-malloc-per-PRead. Prototyped and hammered with 32–192 reader threads on
+  nogil (tmpfs DROP_AFTER_READ and NVMe DIRECT_IO): throughput unchanged
+  within noise — the allocator's per-thread cache already makes the
+  malloc/free pair negligible next to the two syscalls per read. Not worth
+  the extra invariant (PRead callbacks must not re-enter PRead on a thread).
 
 ## API elegance
 
-### 3. Kwargs on the constructor
+### 2. Kwargs on the constructor
 `sackli.Reader(path, sackli.Reader.Options(cache_policy=...))` is the most
 common line users will write. Accept
 `sackli.Reader(path, cache_policy=..., access_pattern=...)` directly (keep
@@ -49,25 +48,25 @@ common line users will write. Accept
 (`cache_policy="drop_after_read"`) would compound the win —
 `sackli.CachePolicy.DROP_AFTER_READ` is 34 characters of ceremony.
 
-### 4. No `close()` / context manager on `Reader`
+### 3. No `close()` / context manager on `Reader`
 Readers hold fds and mmaps until GC; a sharded reader over `@1000` files pins
 1000+ fds (2000+ with the separate tail-limits handle), invisibly. Slices
 share `State` via `shared_ptr` so `close()` has aliasing questions, but even a
 documented "last reference closes" plus an explicit `close()` that invalidates
 the family beats nothing.
 
-### 5. Error mapping **[verified]**
+### 4. Error mapping **[verified]**
 Everything that isn't NotFound/OutOfRange becomes `ValueError` — verified a
 permission error surfaces as `ValueError: PERMISSION_DENIED: ...`. Map
 `PermissionDenied → PermissionError` and I/O-ish codes → `OSError` in
 `ThrowNonOkStatusAsException`.
 
-### 6. `read_ahead_bytes` not exposed to Python
+### 5. `read_ahead_bytes` not exposed to Python
 Exists in C++ `Options` but absent from the bindings and `.pyi` — yet it's the
 knob controlling iterator batch sizing. Expose it or drop it from the C++
 options struct.
 
-### 7. `reversed(data)` returns a `Reader`, not an iterator **[verified]**
+### 6. `reversed(data)` returns a `Reader`, not an iterator **[verified]**
 Violates the `__reversed__` protocol (`next()` fails). The test asserts this
 deliberately, and a lazily-sliced Reader is arguably more useful — but the
 protocol says iterator. Cheap fix: return an iterator; the sliced Reader is
@@ -75,8 +74,8 @@ one expression away for those who want it.
 
 ## Suggested order of attack
 
-1. **#3** (constructor kwargs + string enums): biggest ergonomic win, small
+1. **#2** (constructor kwargs + string enums): biggest ergonomic win, small
    isolated binding change.
 2. **#1** (GIL arena batching) if GIL-build throughput matters at all; it
    also unlocks re-enabling contiguous-read splitting there.
-3. The remaining API papercuts (#4–#7) as a batch.
+3. The remaining API papercuts (#3–#6) as a batch.

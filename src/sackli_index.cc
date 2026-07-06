@@ -17,26 +17,27 @@
 #include <cstddef>
 #include <string>
 #include <utility>
-#include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "src/sackli_reader.h"
+#include "src/sackli_record_scan.h"
 
 namespace sackli {
 
 absl::StatusOr<SackliIndex> SackliIndex::Create(const SackliReader& reader) {
-  size_t num_records = reader.size();
-  absl::StatusOr<std::vector<std::string>> records =
-          reader.ReadRange(0, num_records);
-  if (!records.ok()) {
-    return records.status();
-  }
-
   absl::flat_hash_map<std::string, size_t> index;
-  index.reserve(num_records);
-  for (size_t i = 0; i < num_records; ++i) {
-    index.emplace(std::move((*records)[i]), i);
+  index.reserve(reader.size());
+  if (absl::Status status = internal::ScanRecords(
+          reader, internal::kRecordScanBatchBytes,
+          [&index](size_t start_index, absl::Span<std::string> batch) {
+            for (size_t i = 0; i < batch.size(); ++i) {
+              index.emplace(std::move(batch[i]), start_index + i);
+            }
+          });
+      !status.ok()) {
+    return status;
   }
   return SackliIndex(std::move(index));
 }
