@@ -181,6 +181,8 @@ class LimitsStorage:
   @property
   def value(self) -> int: ...
 
+_CompressionLike = CompressionAutoDetect | CompressionNone | CompressionZstd | str
+
 class Reader(Sequence[bytes]):
   class Options:
     access_pattern: AccessPattern
@@ -192,20 +194,34 @@ class Reader(Sequence[bytes]):
     sharding_layout: ShardingLayout
     def __init__(
         self,
-        sharding_layout: ShardingLayout = ...,
-        limits_placement: LimitsPlacement = ...,
-        compression: (
-            CompressionAutoDetect | CompressionNone | CompressionZstd
-        ) = ...,
-        limits_storage: LimitsStorage = ...,
+        *,
+        sharding_layout: ShardingLayout | str = ...,
+        limits_placement: LimitsPlacement | str = ...,
+        compression: _CompressionLike = ...,
+        limits_storage: LimitsStorage | str = ...,
         max_parallelism: int = ...,
-        access_pattern: AccessPattern = ...,
-        cache_policy: CachePolicy = ...,
+        access_pattern: AccessPattern | str = ...,
+        cache_policy: CachePolicy | str = ...,
     ) -> None:
-      """Options for creating the sackli.Reader."""
+      """Options for creating the sackli.Reader.
+
+      Enum-valued options also accept the case-insensitive name of an enum
+      value (e.g. `cache_policy="drop_after_read"`), and `compression`
+      additionally accepts "auto", "none" or "zstd".
+      """
 
   def __init__(
-      self, file_spec: os.PathLike[str] | str, options: Reader.Options = ...
+      self,
+      file_spec: os.PathLike[str] | str,
+      options: Reader.Options | None = ...,
+      *,
+      sharding_layout: ShardingLayout | str = ...,
+      limits_placement: LimitsPlacement | str = ...,
+      compression: _CompressionLike = ...,
+      limits_storage: LimitsStorage | str = ...,
+      max_parallelism: int = ...,
+      access_pattern: AccessPattern | str = ...,
+      cache_policy: CachePolicy | str = ...,
   ) -> None:
     """Opens a collection of Sackli-formatted files (shards).
 
@@ -216,6 +232,9 @@ class Reader(Sequence[bytes]):
         * comma-separated list of filenames and sharded file-specs (e.g.
           "fs:/path/to/f@3.bagz,fs:/path/to/bar.bagz").
       options: options to use when reading, see `sackli.Reader.Options`.
+      **kwargs: any `sackli.Reader.Options` field can also be passed directly
+        (e.g. `sackli.Reader(path, cache_policy="drop_after_read")`),
+        overriding the corresponding field of `options`.
     """
 
   def count(self, value: bytes) -> int:
@@ -323,12 +342,15 @@ class Writer:
     limits_placement: LimitsPlacement
     def __init__(
         self,
-        limits_placement: LimitsPlacement = ...,
-        compression: (
-            CompressionAutoDetect | CompressionNone | CompressionZstd
-        ) = ...,
+        *,
+        limits_placement: LimitsPlacement | str = ...,
+        compression: _CompressionLike = ...,
     ) -> None:
       """Options for creating the sackli.Writer.
+
+      `limits_placement` also accepts the case-insensitive name of an enum
+      value (e.g. "separate"), and `compression` accepts "auto", "none" or
+      "zstd".
 
       Args:
         limits_placement: Placement of the limits section on close defaulting to
@@ -337,7 +359,12 @@ class Writer:
       """
 
   def __init__(
-      self, filename: os.PathLike[str] | str, options: Writer.Options = ...
+      self,
+      filename: os.PathLike[str] | str,
+      options: Writer.Options | None = ...,
+      *,
+      limits_placement: LimitsPlacement | str = ...,
+      compression: _CompressionLike = ...,
   ) -> None:
     """Open a single Sackli file shard for writing.
 

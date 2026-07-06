@@ -56,7 +56,12 @@ import numpy as np
 data = sackli.Reader('/path/to/data.bagz')
 
 # Säckli Readers can be configured like this - here we require that the file was
-# written with separate limits.
+# written with separate limits. All options can be passed directly as keyword
+# arguments, and enum values can be given as (case-insensitive) strings:
+data_separate_limits = sackli.Reader('/path/to/data.bagz',
+                                     limits_placement='separate')
+
+# The equivalent explicit form:
 data_separate_limits = sackli.Reader('/path/to/data.bagz', sackli.Reader.Options(
     limits_placement=sackli.LimitsPlacement.SEPARATE,
 ))
@@ -151,15 +156,20 @@ with sackli.Writer('/path/to/data.bagz') as writer:
 # Note this will no longer use the extension to detemine whether to compress.
 with sackli.Writer(
     '/path/to/data.bagz',
-    sackli.Writer.Options(
-        compression=sackli.CompressionZstd(level=3)
-    ),
+    compression=sackli.CompressionZstd(level=3),
 ) as writer:
   for d in generate_records():
     writer.write(d)
 ```
 
 ## Options
+
+All options can be given either bundled in an `Options` object
+(`sackli.Reader(path, sackli.Reader.Options(...))`) or directly as keyword
+arguments (`sackli.Reader(path, cache_policy='drop_after_read')`); keyword
+arguments override the corresponding `Options` field. Enum-valued options
+accept the case-insensitive name of an enum value (e.g. `'random'`,
+`'in_memory'`), and `compression` accepts `'auto'`, `'none'` or `'zstd'`.
 
 ### Reader Options
 

@@ -14,6 +14,7 @@
 
 #include "src/python/sackli_writer.h"
 
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -21,9 +22,11 @@
 #include "absl/base/no_destructor.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "src/sackli_options.h"
 #include "src/sackli_writer.h"
+#include "src/python/option_conversions.h"
 #include "pybind11/attr.h"
 #include "pybind11/cast.h"
 #include "pybind11/gil.h"
@@ -55,6 +58,9 @@ Args:
   filename: Filename to open for writing. During writing, a limits file will be
     created with the same name as the filename with the prefix "limits.".
   options: See `sackli.Writer.Options`.
+  **kwargs: any `sackli.Writer.Options` field can also be passed directly
+    (e.g. `sackli.Writer(path, compression="zstd")`), overriding the
+    corresponding field of `options`.
 )";
 
 constexpr char kWriterWriteDoc[] = R"(
@@ -102,10 +108,27 @@ Attributes:
 constexpr char kWriterOptionsInitDoc[] = R"(
 Creates a `sackli.Writer.Options`.
 
+`limits_placement` also accepts the case-insensitive name of an enum value
+(e.g. "separate"), and `compression` accepts "auto", "none" or "zstd".
+
 Args:
   limits_placement: Placement of the limits section on close defaulting to TAIL.
   compression: Compression algorithm to use defaulting to auto-detection.
 )";
+
+// Applies one Writer.Options field given as a keyword argument.
+void ApplyWriterOptionKwarg(SackliWriter::Options& options,
+                            const std::string& key, py::handle value) {
+  if (key == "limits_placement") {
+    options.limits_placement =
+        internal::ToOptionEnum<LimitsPlacement>(value);
+  } else if (key == "compression") {
+    options.compression = internal::ToCompression(value);
+  } else {
+    throw py::type_error(
+        absl::StrCat("got an unexpected keyword argument '", key, "'"));
+  }
+}
 
 }  // namespace
 
@@ -114,22 +137,29 @@ void RegisterSackliWriter(pybind11::module& m) {
       py::class_<SackliWriter>(m, "Writer", "Writes a single Sackli shard.");
 
   py::class_<SackliWriter::Options>(writer, "Options", kWriterOptionsDoc + 1)
-      .def(py::init(
-               [](LimitsPlacement limits_placement, Compression compression) {
-                 return SackliWriter::Options{
-                     .limits_placement = limits_placement,
-                     .compression = std::move(compression),
-                 };
-               }),
-           py::arg("limits_placement") = SackliWriter::Options{}.limits_placement,
-           py::arg("compression") = SackliWriter::Options{}.compression,
+      .def(py::init([](const py::kwargs& kwargs) {
+             SackliWriter::Options options{};
+             for (const auto& item : kwargs) {
+               ApplyWriterOptionKwarg(
+                   options, py::cast<std::string>(item.first), item.second);
+             }
+             return options;
+           }),
            py::doc(kWriterOptionsInitDoc + 1))
       .def_readwrite("limits_placement", &SackliWriter::Options::limits_placement)
       .def_readwrite("compression", &SackliWriter::Options::compression);
 
   writer
       .def(py::init(
-               [](py::object filename_obj, const SackliWriter::Options& options) {
+               [](py::object filename_obj,
+                  std::optional<SackliWriter::Options> options,
+                  const py::kwargs& kwargs) {
+                 SackliWriter::Options merged =
+                     options.value_or(SackliWriter::Options{});
+                 for (const auto& item : kwargs) {
+                   ApplyWriterOptionKwarg(
+                       merged, py::cast<std::string>(item.first), item.second);
+                 }
                  static absl::NoDestructor<py::object> fspath(
                      py::module::import("os").attr("fspath"));
                  std::string filename =
@@ -137,14 +167,14 @@ void RegisterSackliWriter(pybind11::module& m) {
                  {
                    py::gil_scoped_release release_gil;
                    absl::StatusOr<SackliWriter> writer =
-                       SackliWriter::OpenFile(filename, options);
+                       SackliWriter::OpenFile(filename, merged);
                    if (!writer.ok()) {
                      throw std::invalid_argument(writer.status().ToString());
                    }
                    return *std::move(writer);
                  }
                }),
-           py::arg("filename"), py::arg("options") = SackliWriter::Options(),
+           py::arg("filename"), py::arg("options") = py::none(),
            py::doc(kWriterInitDoc + 1))
       .def("__enter__", [](SackliWriter& self) -> SackliWriter& { return self; })
       .def(

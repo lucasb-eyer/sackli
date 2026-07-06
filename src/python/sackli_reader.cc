@@ -39,6 +39,7 @@
 #include "absl/types/span.h"
 #include "src/sackli_iterator.h"
 #include "src/sackli_options.h"
+#include "src/python/option_conversions.h"
 #include "pybind11/attr.h"
 #include "pybind11/cast.h"
 #include "pybind11/gil.h"
@@ -129,6 +130,10 @@ void ThrowNonOkStatusAsException(const absl::Status& status) {
 constexpr char kOptionsDoc[] = R"(
 Options for creating the sackli.Reader.
 
+Enum-valued options also accept the case-insensitive name of an enum value
+(e.g. `cache_policy="drop_after_read"`), and `compression` additionally
+accepts "auto", "none" or "zstd".
+
 Args:
   sharding_layout: Specifies how input indexes/ranges are mapped to the
     underlying records within the shards. See README.md#sharding.
@@ -155,7 +160,33 @@ Args:
     * comma-separated list of filenames and sharded file-specs
       (e.g. "fs:/path/to/f@3.bagz,fs:/path/to/bar.bagz").
   options: options to use when reading, see `sackli.Reader.Options`.
+  **kwargs: any `sackli.Reader.Options` field can also be passed directly
+    (e.g. `sackli.Reader(path, cache_policy="drop_after_read")`), overriding
+    the corresponding field of `options`.
 )";
+
+// Applies one Reader.Options field given as a keyword argument.
+void ApplyReaderOptionKwarg(SackliReader::Options& options,
+                            const std::string& key, py::handle value) {
+  if (key == "sharding_layout") {
+    options.sharding_layout = internal::ToOptionEnum<ShardingLayout>(value);
+  } else if (key == "limits_placement") {
+    options.limits_placement = internal::ToOptionEnum<LimitsPlacement>(value);
+  } else if (key == "compression") {
+    options.compression = internal::ToCompression(value);
+  } else if (key == "limits_storage") {
+    options.limits_storage = internal::ToOptionEnum<LimitsStorage>(value);
+  } else if (key == "max_parallelism") {
+    options.max_parallelism = py::cast<int>(value);
+  } else if (key == "access_pattern") {
+    options.access_pattern = internal::ToOptionEnum<AccessPattern>(value);
+  } else if (key == "cache_policy") {
+    options.cache_policy = internal::ToOptionEnum<CachePolicy>(value);
+  } else {
+    throw py::type_error(
+        absl::StrCat("got an unexpected keyword argument '", key, "'"));
+  }
+}
 
 SackliReader Init(py::object file_spec_obj, const SackliReader::Options& options) {
   static absl::NoDestructor<py::object> fspath(
@@ -604,28 +635,15 @@ void RegisterSackliReader(py::module& m) {
       m, "ReaderIterator", "Iterator for a SackliReader.");
 
   py::class_<SackliReader::Options>(reader, "Options", kOptionsDoc + 1)
-      .def(
-          py::init([](ShardingLayout sharding_layout,
-                      LimitsPlacement limits_placement, Compression compression,
-                      LimitsStorage limits_storage, int max_parallelism,
-                      AccessPattern access_pattern, CachePolicy cache_policy) {
-            return SackliReader::Options{
-                .sharding_layout = sharding_layout,
-                .limits_placement = limits_placement,
-                .compression = compression,
-                .limits_storage = limits_storage,
-                .access_pattern = access_pattern,
-                .cache_policy = cache_policy,
-                .max_parallelism = max_parallelism,
-            };
-          }),
-          py::arg("sharding_layout") = SackliReader::Options{}.sharding_layout,
-          py::arg("limits_placement") = SackliReader::Options{}.limits_placement,
-          py::arg("compression") = SackliReader::Options{}.compression,
-          py::arg("limits_storage") = SackliReader::Options{}.limits_storage,
-          py::arg("max_parallelism") = SackliReader::Options{}.max_parallelism,
-          py::arg("access_pattern") = SackliReader::Options{}.access_pattern,
-          py::arg("cache_policy") = SackliReader::Options{}.cache_policy)
+      .def(py::init([](const py::kwargs& kwargs) {
+             SackliReader::Options options{};
+             for (const auto& item : kwargs) {
+               ApplyReaderOptionKwarg(
+                   options, py::cast<std::string>(item.first), item.second);
+             }
+             return options;
+           }),
+           py::doc(kOptionsDoc + 1))
       .def_readwrite("sharding_layout", &SackliReader::Options::sharding_layout)
       .def_readwrite("limits_placement", &SackliReader::Options::limits_placement)
       .def_readwrite("compression", &SackliReader::Options::compression)
@@ -635,8 +653,19 @@ void RegisterSackliReader(py::module& m) {
       .def_readwrite("cache_policy", &SackliReader::Options::cache_policy);
 
   reader
-      .def(py::init(&Init), py::arg("file_spec"),
-           py::arg("options") = SackliReader::Options{}, py::doc(kInitDoc + 1))
+      .def(py::init([](py::object file_spec,
+                       std::optional<SackliReader::Options> options,
+                       const py::kwargs& kwargs) {
+             SackliReader::Options merged =
+                 options.value_or(SackliReader::Options{});
+             for (const auto& item : kwargs) {
+               ApplyReaderOptionKwarg(
+                   merged, py::cast<std::string>(item.first), item.second);
+             }
+             return Init(std::move(file_spec), merged);
+           }),
+           py::arg("file_spec"), py::arg("options") = py::none(),
+           py::doc(kInitDoc + 1))
       .def("__len__", &SackliReader::size)
       .def("__getitem__", &GetItem, py::arg("index"), py::doc(kGetItemDoc + 1))
       .def("__getitem__", &GetSlice, py::arg("slice"), py::doc(kGetItemDoc + 1))

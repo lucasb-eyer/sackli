@@ -496,6 +496,50 @@ def test_sequence_methods(tmp_path: Path) -> None:
   assert list(reversed_reader) == list(reader)[::-1]
 
 
+def test_options_kwargs_and_strings(tmp_path: Path) -> None:
+  file = tmp_path / 'data.bagz'
+  records = list(_generate_records(_NUM_RECORDS))
+  with sackli.Writer(file, compression='zstd') as writer:
+    for record in records:
+      writer.write(record)
+
+  # Options fields can be passed directly to the constructors, as enum
+  # values or (case-insensitive) strings.
+  reader = sackli.Reader(
+      file,
+      cache_policy='drop_after_read',
+      access_pattern=sackli.AccessPattern.RANDOM,
+      limits_storage='IN_MEMORY',
+      max_parallelism=4,
+  )
+  assert list(reader) == records
+
+  # Explicit Options combined with keyword overrides.
+  reader = sackli.Reader(
+      file, sackli.Reader.Options(max_parallelism=2), cache_policy='system'
+  )
+  assert reader[0] == records[0]
+
+  # Options() accepts strings too.
+  options = sackli.Reader.Options(compression='none', cache_policy='direct_io')
+  assert options.cache_policy == sackli.CachePolicy.DIRECT_IO
+  assert isinstance(options.compression, sackli.CompressionNone)
+
+  with pytest.raises(ValueError, match='drop_after_reed'):
+    sackli.Reader(file, cache_policy='drop_after_reed')
+  with pytest.raises(TypeError, match='cash_policy'):
+    sackli.Reader(file, cash_policy='system')
+  with pytest.raises(ValueError, match='gzip'):
+    sackli.Writer(tmp_path / 'other.bag', compression='gzip')
+  with pytest.raises(TypeError, match='compresion'):
+    sackli.Writer(tmp_path / 'other.bag', compresion='zstd')
+
+  with sackli.Writer(tmp_path / 'sep.bag', limits_placement='separate') as w:
+    w.write(records[0])
+  sep_reader = sackli.Reader(tmp_path / 'sep.bag', limits_placement='separate')
+  assert sep_reader[0] == records[0]
+
+
 def test_negative_indexing(tmp_path: Path) -> None:
   file = tmp_path / 'data.bagz'
   records = list(_generate_records(_NUM_RECORDS))
