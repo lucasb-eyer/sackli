@@ -49,6 +49,17 @@ std::shared_ptr<void> MakePinnedPythonThreadState() {
 PYBIND11_MODULE(sackli, m, pybind11::mod_gil_not_used()) {
   m.doc() = "Sackli Python Bindings";
   internal::ThreadPool::SetTaskGuardFactory(&MakePinnedPythonThreadState);
+  // With the GIL enabled, per-record allocations serialize worker threads,
+  // so contiguous reads must not be split across threads.
+  bool callbacks_scale = false;
+  try {
+    callbacks_scale = !pybind11::module_::import("sys")
+                           .attr("_is_gil_enabled")()
+                           .cast<bool>();
+  } catch (const pybind11::error_already_set&) {
+    // No sys._is_gil_enabled (< 3.13): the GIL is always enabled.
+  }
+  SackliReader::SetCallbackConcurrencyHint(callbacks_scale);
   RegisterSackliIndex(m);
   RegisterSackliMultiIndex(m);
   RegisterSackliOptions(m);

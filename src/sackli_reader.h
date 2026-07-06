@@ -80,6 +80,13 @@ class SackliReader {
     uint64_t num_bytes;
   };
 
+  // Process-wide hint set by language bindings: whether record-allocation
+  // callbacks scale across threads. When false (e.g. Python with the GIL
+  // enabled), contiguous reads are not split across threads, since per-record
+  // allocation would serialize the workers anyway and the contention makes
+  // them slower than a single thread. Defaults to true.
+  static void SetCallbackConcurrencyHint(bool scales_across_threads);
+
   // Opens a collection of Sackli-formatted files (shards).
   //
   // `filespec` is either:

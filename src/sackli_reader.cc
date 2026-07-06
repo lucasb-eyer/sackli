@@ -54,6 +54,9 @@
 namespace sackli {
 namespace {
 
+// See SackliReader::SetCallbackConcurrencyHint.
+std::atomic<bool> callback_concurrency_hint{true};
+
 struct ReaderOpenHandles {
   std::unique_ptr<PReadFile> records;
   // For kSeparate this is the limits file; for kTail this may be an alternate
@@ -560,11 +563,58 @@ struct SackliReader::State {
     }
   }
 
+  // Splits shard ranges into sub-ranges of at most `max_task_records`
+  // records. Sub-ranges keep the result mapping of their parent range.
+  static std::vector<internal::ShardRange> SplitShardRanges(
+      absl::Span<const internal::ShardRange> shard_ranges,
+      size_t max_task_records) {
+    std::vector<internal::ShardRange> split_ranges;
+    for (const internal::ShardRange& range : shard_ranges) {
+      for (size_t offset = 0; offset < range.count;
+           offset += max_task_records) {
+        split_ranges.push_back(internal::ShardRange{
+            .shard = range.shard,
+            .shard_start = range.shard_start + offset,
+            .count = std::min(max_task_records, range.count - offset),
+            .result_offset =
+                range.result_offset + offset * range.result_stride,
+            .result_stride = range.result_stride});
+      }
+    }
+    return split_ranges;
+  }
+
   absl::Status ReadShardRanges(
       absl::Span<const internal::ShardRange> shard_ranges,
       absl::FunctionRef<absl::Span<char>(size_t result_index,
                                          size_t record_size)>
           allocate_for_index) const {
+    // A contiguous read maps to one range per shard, which would otherwise
+    // serialize the whole read (including decompression) on one thread.
+    // Split large ranges so the full parallelism can be used, but keep tasks
+    // large enough that the per-task limits read stays negligible. Skip the
+    // split when allocation callbacks do not scale across threads (GIL):
+    // contended workers are slower than one thread there.
+    std::vector<internal::ShardRange> split_ranges;
+    if (options_.max_parallelism > 1 && !shard_ranges.empty() &&
+        callback_concurrency_hint.load(std::memory_order_relaxed)) {
+      constexpr size_t kMinRecordsPerTask = 32;
+      size_t total_records = 0;
+      for (const internal::ShardRange& range : shard_ranges) {
+        total_records += range.count;
+      }
+      const size_t max_task_records =
+          std::max(kMinRecordsPerTask,
+                   total_records /
+                       (2 * static_cast<size_t>(options_.max_parallelism)));
+      for (const internal::ShardRange& range : shard_ranges) {
+        if (range.count > max_task_records) {
+          split_ranges = SplitShardRanges(shard_ranges, max_task_records);
+          shard_ranges = split_ranges;
+          break;
+        }
+      }
+    }
     return thread_pool_.ParallelDo(
         shard_ranges.size(),
         [&](size_t shard_index) -> absl::Status {
@@ -798,6 +848,11 @@ absl::Status SackliReader::ReadIndicesWithAllocator(
   }
   return state_->ReadIndicesWithAllocator(indices, allocate_for_index,
                                           copy_result);
+}
+
+void SackliReader::SetCallbackConcurrencyHint(bool scales_across_threads) {
+  callback_concurrency_hint.store(scales_across_threads,
+                                  std::memory_order_relaxed);
 }
 
 absl::StatusOr<SackliReader> SackliReader::Open(absl::string_view filespec,
