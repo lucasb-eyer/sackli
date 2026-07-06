@@ -62,40 +62,58 @@ class FileNotFoundError : public py::builtin_exception {
 };
 
 // Helper class to allocate results for callback-based reads.
+//
+// Records are parked in a plain C++ vector rather than a py::list: callbacks
+// run concurrently and write to distinct slots, so no Python container is
+// mutated from multiple threads (a shared list would serialize free-threading
+// builds on its per-object lock). The caller moves the results into a list
+// afterwards with MoveIntoList.
 class IndexedAllocator {
  public:
-  // Construct with GIL held.
-  explicit IndexedAllocator(py::list& result) : result_(result) {}
+  explicit IndexedAllocator(std::vector<py::object>& results)
+      : results_(results) {}
 
-  // Use callback without GIL held. GIL is released before returning.
+  // Called without the GIL held, possibly from multiple threads with
+  // distinct `result_index`es. The GIL is released again before returning.
   absl::Span<char> operator()(size_t result_index, ssize_t num_bytes) const {
     py::gil_scoped_acquire acquire;
     py::bytes record(nullptr, num_bytes);
     char* bytes;
     PyBytes_AsStringAndSize(record.ptr(), &bytes, &num_bytes);
-    result_[result_index] = std::move(record);
+    results_[result_index] = std::move(record);
     return absl::Span<char>(bytes, num_bytes);
   }
 
  private:
-  py::list& result_;
+  std::vector<py::object>& results_;
 };
 
-// Helper to copy results from one list to another.
+// Helper to copy a result to the slots of duplicated indices.
 class IndexedCopy {
  public:
-  // Construct with GIL held.
-  explicit IndexedCopy(py::list& result) : result_(result) {}
+  explicit IndexedCopy(std::vector<py::object>& results) : results_(results) {}
 
-  // Use callback with GIL held. GIL is released before returning.
+  // Called without the GIL held. The GIL is released again before returning.
   void operator()(size_t from_index, ssize_t to_index) const {
     py::gil_scoped_acquire acquire;
-    result_[to_index] = result_[from_index];
+    results_[to_index] = results_[from_index];
   }
 
  private:
-  py::list& result_;
+  std::vector<py::object>& results_;
 };
+
+// Moves fully-populated results into a py::list. Must be called with the GIL
+// held; every slot of `results` must be non-null.
+py::list MoveIntoList(std::vector<py::object>& results) {
+  py::list list(results.size());
+  for (size_t i = 0; i < results.size(); ++i) {
+    // The new list's slots start out empty; SET_ITEM steals the reference.
+    PyList_SET_ITEM(list.ptr(), static_cast<ssize_t>(i),
+                    results[i].release().ptr());
+  }
+  return list;
+}
 
 void ThrowNonOkStatusAsException(const absl::Status& status) {
   if (!status.ok()) {
@@ -156,13 +174,13 @@ Returns all the records in the range [start, start + num_records).
 )";
 
 py::list ReadRange(const SackliReader& reader, size_t start, size_t num_records) {
-  py::list result(num_records);
+  std::vector<py::object> results(num_records);
   {
     py::gil_scoped_release release;
     ThrowNonOkStatusAsException(reader.ReadRangeWithAllocator(
-        start, num_records, IndexedAllocator(result)));
+        start, num_records, IndexedAllocator(results)));
   }
-  return result;
+  return MoveIntoList(results);
 }
 
 constexpr char kReadIndicesDoc[] = R"(
@@ -171,13 +189,13 @@ Returns the records at the given indices.
 
 py::list ReadIndicesFromSpan(const SackliReader& reader,
                              absl::Span<const size_t> indices) {
-  py::list result(indices.size());
+  std::vector<py::object> results(indices.size());
   {
     py::gil_scoped_release release;
     ThrowNonOkStatusAsException(reader.ReadIndicesWithAllocator(
-        indices, IndexedAllocator(result), IndexedCopy(result)));
+        indices, IndexedAllocator(results), IndexedCopy(results)));
   }
-  return result;
+  return MoveIntoList(results);
 }
 
 // Resolves negative indices relative to `num_records`, like Python sequences
