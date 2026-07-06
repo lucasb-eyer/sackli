@@ -240,6 +240,23 @@ class Reader(Sequence[bytes]):
         overriding the corresponding field of `options`.
     """
 
+  @property
+  def closed(self) -> bool:
+    """Whether this reader handle has been closed."""
+
+  def close(self) -> None:
+    """Closes this reader handle; further operations on it raise ValueError.
+
+    The underlying files are closed once the last handle sharing them (this
+    reader, slices made from it, and any live iterators) is closed or garbage
+    collected. Do not call concurrently with in-flight reads on this handle.
+    """
+
+  def __enter__(self) -> Reader: ...
+  def __exit__(
+      self, exc_type: object, exc_value: object, traceback: object
+  ) -> None: ...
+
   def count(self, value: bytes) -> int:
     """Returns the number of occurrences of the given value in the reader."""
 

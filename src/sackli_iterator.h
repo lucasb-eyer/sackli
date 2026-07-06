@@ -72,6 +72,10 @@ class SackliIterator {
         make_result_(std::forward<ResultMaker>(make_result)),
         span_from_result_(std::forward<SpanFromResult>(span_from_result)),
         buffer_edit_guard_(std::forward<BufferEditGuard>(buffer_edit_guard)) {
+    if (reader_.IsClosed()) {
+      more_to_read_ = false;
+      return;
+    }
     size_t num_ahead;
     if (read_ahead.has_value()) {
       num_ahead = *read_ahead;

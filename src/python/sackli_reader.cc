@@ -149,6 +149,14 @@ Args:
     the corresponding field of `options`.
 )";
 
+constexpr char kCloseDoc[] = R"(
+Closes this reader handle; further operations on it raise ValueError.
+
+The underlying files are closed once the last handle sharing them (this
+reader, slices made from it, and any live iterators) is closed or garbage
+collected. Do not call concurrently with in-flight reads on this handle.
+)";
+
 // Applies one Reader.Options field given as a keyword argument.
 void ApplyReaderOptionKwarg(SackliReader::Options& options,
                             const std::string& key, py::handle value) {
@@ -174,6 +182,14 @@ void ApplyReaderOptionKwarg(SackliReader::Options& options,
   }
 }
 
+// Raises ValueError for operations on a closed reader, mirroring closed
+// Python file objects.
+void EnsureOpen(const SackliReader& reader) {
+  if (reader.IsClosed()) {
+    throw py::value_error("Reader is closed.");
+  }
+}
+
 SackliReader Init(py::object file_spec_obj, const SackliReader::Options& options) {
   static absl::NoDestructor<py::object> fspath(
       py::module::import("os").attr("fspath"));
@@ -191,6 +207,7 @@ Returns all the records in the range [start, start + num_records).
 )";
 
 py::list ReadRange(const SackliReader& reader, size_t start, size_t num_records) {
+  EnsureOpen(reader);
   std::vector<py::object> results(num_records);
   {
     py::gil_scoped_release release;
@@ -206,6 +223,7 @@ Returns the records at the given indices.
 
 py::list ReadIndicesFromSpan(const SackliReader& reader,
                              absl::Span<const size_t> indices) {
+  EnsureOpen(reader);
   std::vector<py::object> results(indices.size());
   {
     py::gil_scoped_release release;
@@ -241,6 +259,7 @@ std::vector<size_t> NormalizeNegativeIndices(absl::Span<const int64_t> indices,
 template <typename Int64>
 py::list ReadIndicesFromNumpy(const SackliReader& reader,
                               py::array_t<Int64, py::array::c_style> indices) {
+  EnsureOpen(reader);
   static_assert(sizeof(Int64) == sizeof(size_t),
                 "Int64 must be the same size as size_t");
   if (indices.ndim() != 1) {
@@ -261,11 +280,13 @@ py::list ReadIndicesFromNumpy(const SackliReader& reader,
 
 py::list ReadIndicesFromIterable(const SackliReader& reader,
                                  std::vector<int64_t> indices) {
+  EnsureOpen(reader);
   return ReadIndicesFromSpan(reader,
                              NormalizeNegativeIndices(indices, reader.size()));
 }
 
 py::list ReadIndicesFromSlice(const SackliReader& reader, py::slice slice) {
+  EnsureOpen(reader);
   ssize_t start, stop, step, slicelength;
   if (!slice.compute(static_cast<ssize_t>(reader.size()), &start, &stop, &step,
                      &slicelength)) {
@@ -293,6 +314,7 @@ Negative indices count from the end, like other Python sequences.
 )";
 
 py::bytes GetItem(const SackliReader& reader, ssize_t index) {
+  EnsureOpen(reader);
   const ssize_t size = static_cast<ssize_t>(reader.size());
   const ssize_t adjusted = index < 0 ? index + size : index;
   if (adjusted < 0 || adjusted >= size) {
@@ -316,6 +338,7 @@ py::bytes GetItem(const SackliReader& reader, ssize_t index) {
 }
 
 SackliReader GetSlice(const SackliReader& reader, py::slice slice) {
+  EnsureOpen(reader);
   ssize_t step, start, stop, slicelength;
   if (!slice.compute(static_cast<ssize_t>(reader.size()), &start, &stop, &step,
                      &slicelength)) {
@@ -332,6 +355,7 @@ SackliReader GetSlice(const SackliReader& reader, py::slice slice) {
 // Returns whether any `callback` returned true.
 template <typename CallBack>
 bool AnyOf(SackliReader reader, CallBack&& callback) {
+  EnsureOpen(reader);
   py::gil_scoped_release release;
   SackliIterator iterator(std::move(reader));
   absl::Time time_start = absl::Now();
@@ -363,6 +387,7 @@ Raises a ValueError if the value is not found.
 
 size_t IndexOf(const SackliReader& reader, py::bytes value, ssize_t start,
                std::optional<ssize_t> stop) {
+  EnsureOpen(reader);
   absl::string_view bytes = py::cast<absl::string_view>(value);
   // Sequence.index semantics: negative bounds count from the end and both
   // bounds are clamped to [0, size]; the search range is [start, stop).
@@ -654,11 +679,29 @@ void RegisterSackliReader(py::module& m) {
            }),
            py::arg("file_spec"), py::arg("options") = py::none(),
            py::doc(kInitDoc + 1))
-      .def("__len__", &SackliReader::size)
+      .def("__len__",
+           [](const SackliReader& reader) {
+             EnsureOpen(reader);
+             return reader.size();
+           })
+      .def("close", &SackliReader::Close, py::doc(kCloseDoc + 1))
+      .def_property_readonly("closed", &SackliReader::IsClosed,
+                             "Whether this reader handle has been closed.")
+      .def("__enter__",
+           [](const SackliReader& reader) -> const SackliReader& {
+             EnsureOpen(reader);
+             return reader;
+           })
+      .def(
+          "__exit__",
+          [](SackliReader& reader, py::handle exc_type, py::handle exc_value,
+             py::handle traceback) { reader.Close(); },
+          py::arg("exc_type"), py::arg("exc_value"), py::arg("traceback"))
       .def("__getitem__", &GetItem, py::arg("index"), py::doc(kGetItemDoc + 1))
       .def("__getitem__", &GetSlice, py::arg("slice"), py::doc(kGetItemDoc + 1))
       .def("__reversed__",
            [](const SackliReader& reader) {
+             EnsureOpen(reader);
              if (reader.size() == 0) {
                return PythonIterator(reader, std::nullopt);
              }
@@ -668,7 +711,10 @@ void RegisterSackliReader(py::module& m) {
              return PythonIterator(*std::move(reverse_reader), std::nullopt);
            })
       .def("approximate_bytes_per_record",
-           &SackliReader::ApproximateNumBytesPerRecord)
+           [](const SackliReader& reader) {
+             EnsureOpen(reader);
+             return reader.ApproximateNumBytesPerRecord();
+           })
       .def("read",
            [](const SackliReader& reader) {
              return ReadRange(reader, 0, reader.size());
@@ -678,6 +724,7 @@ void RegisterSackliReader(py::module& m) {
           [](const SackliReader& reader, std::size_t start,
              std::size_t num_records,
              std::optional<size_t> read_ahead = std::nullopt) {
+            EnsureOpen(reader);
             auto reader_slice = reader.Slice(start, 1, num_records);
             internal::ThrowIfNotOk(reader_slice.status());
             return PythonIterator(*std::move(reader_slice), read_ahead);
@@ -688,6 +735,7 @@ void RegisterSackliReader(py::module& m) {
           "read_indices_iter",
           [](const SackliReader& reader, py::object indices_iterable,
              std::optional<size_t> read_ahead = std::nullopt) {
+            EnsureOpen(reader);
             PyObject* indices_iter = PyObject_GetIter(indices_iterable.ptr());
             if (PyErr_Occurred()) {
               throw py::error_already_set();
@@ -700,6 +748,7 @@ void RegisterSackliReader(py::module& m) {
           py::arg("read_ahead") = std::nullopt)
       .def("__iter__",
            [](const SackliReader& reader) {
+             EnsureOpen(reader);
              return PythonIterator(reader, std::nullopt);
            })
       .def("__contains__", &Contains, py::arg("value"),

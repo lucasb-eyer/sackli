@@ -107,10 +107,19 @@ class SackliReader {
   absl::StatusOr<SackliReader> Slice(size_t start, int64_t step,
                                    size_t length) const;
 
-  // Returns the opening options.
+  // Returns the opening options. Must not be called on a closed reader.
   const Options& options() const;
 
-  // Returns the number of records in the bag.
+  // Closes this reader handle: further reads fail with FailedPrecondition.
+  // The underlying files are closed when the last handle sharing them (the
+  // reader, its slices, and any live iterators) is closed or destroyed.
+  // Must not be called while reads on this handle are in flight.
+  void Close() { state_.reset(); }
+
+  // Returns whether this reader handle has been closed.
+  [[nodiscard]] bool IsClosed() const { return state_ == nullptr; }
+
+  // Returns the number of records in this reader view.
   [[nodiscard]] size_t size() const;
 
   // Returns the approximate number of (possibly compressed) bytes per record in
@@ -230,9 +239,9 @@ class SackliReader {
         slice_step_(slice_step),
         slice_length_(slice_length) {}
   std::shared_ptr<const State> state_;
-  size_t slice_start_;
-  int64_t slice_step_;
-  size_t slice_length_;
+  size_t slice_start_ = 0;
+  int64_t slice_step_ = 1;
+  size_t slice_length_ = 0;
 };
 
 }  // namespace sackli

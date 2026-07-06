@@ -499,6 +499,51 @@ def test_sequence_methods(tmp_path: Path) -> None:
   assert list(reader[::-1]) == list(reader)[::-1]
 
 
+def test_reader_close(tmp_path: Path) -> None:
+  file = tmp_path / 'data.bagz'
+  records = list(_generate_records(_NUM_RECORDS))
+  with sackli.Writer(file) as writer:
+    for record in records:
+      writer.write(record)
+
+  reader = sackli.Reader(file)
+  sliced = reader[2:]
+  it = iter(reader)
+  assert not reader.closed
+  reader.close()
+  assert reader.closed
+  reader.close()  # Closing again is a no-op.
+
+  for operation in (
+      lambda: reader[0],
+      lambda: reader[:],
+      lambda: len(reader),
+      lambda: reversed(reader),
+      lambda: reader.read(),
+      lambda: reader.read_indices([0]),
+      lambda: reader.approximate_bytes_per_record(),
+      lambda: iter(reader),
+      lambda: b'x' in reader,
+      lambda: reader.index(b'x'),
+      lambda: reader.count(b'x'),
+      lambda: reader.read_indices_iter([0]),
+      lambda: reader.read_range_iter(0, 1),
+      lambda: sackli.Index(reader),
+      lambda: sackli.MultiIndex(reader),
+  ):
+    with pytest.raises(ValueError):
+      operation()
+
+  # Slices and already-created iterators share the underlying files and
+  # keep working until they are closed / collected themselves.
+  assert sliced[0] == records[2]
+  assert next(it) == records[0]
+
+  with sackli.Reader(file) as ctx_reader:
+    assert ctx_reader[0] == records[0]
+  assert ctx_reader.closed
+
+
 def test_error_mapping(tmp_path: Path) -> None:
   file = tmp_path / 'data.bagz'
   with sackli.Writer(file) as writer:

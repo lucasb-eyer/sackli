@@ -39,6 +39,9 @@ inline absl::Status ScanRecords(
     const SackliReader& reader, size_t batch_bytes,
     absl::FunctionRef<void(size_t start_index, absl::Span<std::string> batch)>
         callback) {
+  if (reader.IsClosed()) {
+    return absl::FailedPreconditionError("Reader is closed.");
+  }
   const size_t num_records = reader.size();
   // Estimate on-disk bytes per record. Each batch entry also pays a
   // std::string shell, which dominates for small uncompressed records; for

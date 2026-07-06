@@ -694,10 +694,13 @@ absl::StatusOr<SackliReader> SackliReader::BuildFromFilePairs(
 size_t SackliReader::size() const { return slice_length_; }
 
 double SackliReader::ApproximateNumBytesPerRecord() const {
-  return state_->ApproximateNumBytesPerRecord();
+  return state_ == nullptr ? 0.0 : state_->ApproximateNumBytesPerRecord();
 }
 
 absl::StatusOr<std::string> SackliReader::operator[](size_t index) const {
+  if (state_ == nullptr) {
+    return absl::FailedPreconditionError("Reader is closed.");
+  }
   if (index >= slice_length_) {
     return absl::OutOfRangeError(absl::StrCat(
         "index ", index, " out of range [0, ", slice_length_, ")"));
@@ -712,6 +715,9 @@ absl::StatusOr<std::string> SackliReader::operator[](size_t index) const {
 
 absl::StatusOr<std::vector<std::string>> SackliReader::ReadRange(
     size_t start, size_t num_records) const {
+  if (state_ == nullptr) {
+    return absl::FailedPreconditionError("Reader is closed.");
+  }
   if (start + num_records > slice_length_) {
     return absl::OutOfRangeError(
         absl::StrCat("Range [", start, ", ", start + num_records,
@@ -754,6 +760,9 @@ absl::StatusOr<std::vector<std::string>> SackliReader::ReadRange(
 
 absl::StatusOr<std::vector<std::string>> SackliReader::ReadIndices(
     absl::Span<const size_t> indices) const {
+  if (state_ == nullptr) {
+    return absl::FailedPreconditionError("Reader is closed.");
+  }
   std::vector<std::size_t> indices_vector;
   if (slice_step_ != 1 || slice_start_ != 0) {
     indices_vector.reserve(indices.size());
@@ -790,6 +799,9 @@ absl::StatusOr<std::vector<std::string>> SackliReader::ReadIndices(
 absl::Status SackliReader::ReadWithAllocator(
     size_t index,
     absl::FunctionRef<absl::Span<char>(size_t record_size)> allocate) const {
+  if (state_ == nullptr) {
+    return absl::FailedPreconditionError("Reader is closed.");
+  }
   if (index >= slice_length_) {
     return absl::OutOfRangeError(absl::StrCat(
         "index ", index, " out of range [0, ", slice_length_, ")"));
@@ -802,6 +814,9 @@ absl::Status SackliReader::ReadRangeWithAllocator(
     size_t start, size_t num_records,
     absl::FunctionRef<absl::Span<char>(size_t result_index, size_t record_size)>
         allocate_for_index) const {
+  if (state_ == nullptr) {
+    return absl::FailedPreconditionError("Reader is closed.");
+  }
   if (start + num_records > slice_length_) {
     return absl::OutOfRangeError(
         absl::StrCat("Range ", start, ", ", start + num_records,
@@ -831,6 +846,9 @@ absl::Status SackliReader::ReadIndicesWithAllocator(
         allocate_for_index,
     absl::FunctionRef<void(size_t from_index, size_t to_index)> copy_result)
     const {
+  if (state_ == nullptr) {
+    return absl::FailedPreconditionError("Reader is closed.");
+  }
   std::vector<size_t> indices_vector;
   if (slice_step_ != 1 || slice_start_ != 0) {
     indices_vector.reserve(indices.size());
@@ -879,6 +897,9 @@ absl::StatusOr<SackliReader> SackliReader::Open(absl::string_view filespec,
 }
 
 absl::StatusOr<SackliReader::Handle> SackliReader::ReadHandle(size_t index) const {
+  if (state_ == nullptr) {
+    return absl::FailedPreconditionError("Reader is closed.");
+  }
   if (index >= slice_length_) {
     return absl::OutOfRangeError(absl::StrCat(
         "index ", index, " out of range [0, ", slice_length_, ")"));
@@ -887,6 +908,9 @@ absl::StatusOr<SackliReader::Handle> SackliReader::ReadHandle(size_t index) cons
 }
 
 absl::StatusOr<std::string> SackliReader::ReadFromHandle(Handle handle) const {
+  if (state_ == nullptr) {
+    return absl::FailedPreconditionError("Reader is closed.");
+  }
   std::string result;
   if (absl::Status status =
           state_->ReadFromHandleWithAllocator(handle,
@@ -904,11 +928,17 @@ absl::StatusOr<std::string> SackliReader::ReadFromHandle(Handle handle) const {
 absl::Status SackliReader::ReadFromHandleWithAllocator(
     Handle handle,
     absl::FunctionRef<absl::Span<char>(size_t record_size)> allocate) const {
+  if (state_ == nullptr) {
+    return absl::FailedPreconditionError("Reader is closed.");
+  }
   return state_->ReadFromHandleWithAllocator(handle, allocate);
 }
 
 absl::StatusOr<SackliReader> SackliReader::Slice(size_t start, int64_t step,
                                              size_t length) const {
+  if (state_ == nullptr) {
+    return absl::FailedPreconditionError("Reader is closed.");
+  }
   size_t num_records = size();
   if (step == 0) {
     return absl::OutOfRangeError("step must be non-zero");

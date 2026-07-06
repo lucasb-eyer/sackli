@@ -120,6 +120,16 @@ Note that the `Sequence` methods `value in reader`, `reader.count(value)` and
 (and decompress) everything up to the first match. Use `sackli.Index` /
 `sackli.MultiIndex` if you need repeated record lookups.
 
+Readers hold open file handles (and mmaps) until garbage collected. They can
+be closed eagerly with `reader.close()` or by using the reader as a context
+manager; the underlying files close once the last handle sharing them (the
+reader, slices made from it, and live iterators) is closed or collected.
+
+```python
+with sackli.Reader('/path/to/data.bagz') as data:
+  first = data[0]
+```
+
 #### Python Reader - `Index` and `MultiIndex`
 
 You can use `Index` to find the first index of a record and `MultiIndex` to find

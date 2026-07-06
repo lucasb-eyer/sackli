@@ -804,6 +804,27 @@ bool TestScanRecordsAllowsSingleRecordBatches() {
                 "scan-records: wrong batch sizes");
 }
 
+bool TestClosedReaderOperationsFail() {
+  SackliReader reader;
+  const SackliReader::Handle handle{};
+  absl::StatusOr<std::string> record = reader.ReadFromHandle(handle);
+  if (!Expect(record.status().code() ==
+                  absl::StatusCode::kFailedPrecondition,
+              "closed-reader: ReadFromHandle should fail")) {
+    return false;
+  }
+  absl::Status allocator_status = reader.ReadFromHandleWithAllocator(
+      handle, [](size_t) -> absl::Span<char> { return {}; });
+  if (!Expect(allocator_status.code() ==
+                  absl::StatusCode::kFailedPrecondition,
+              "closed-reader: ReadFromHandleWithAllocator should fail")) {
+    return false;
+  }
+  absl::StatusOr<SackliReader> slice = reader.Slice(0, 1, 0);
+  return Expect(slice.status().code() == absl::StatusCode::kFailedPrecondition,
+                "closed-reader: Slice should fail");
+}
+
 }  // namespace
 
 int RunTests() {
@@ -822,7 +843,8 @@ int RunTests() {
                   TestPosixDirectBackendReadsAcrossTailBoundaryIfSupported() &&
                   TestPosixDirectBackendHonorsEarlyStopIfSupported() &&
                   TestReaderReadsShardedDirectIoFilesIfSupported() &&
-                  TestScanRecordsAllowsSingleRecordBatches();
+                  TestScanRecordsAllowsSingleRecordBatches() &&
+                  TestClosedReaderOperationsFail();
   return ok ? 0 : 1;
 }
 
