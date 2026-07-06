@@ -17,6 +17,29 @@ free-threading build): compressed single-shard `read()` 0.13s -> 0.033s,
 full-permutation `read_indices` 7.2s -> 0.046s, iteration 0.23s -> 0.036s.
 GIL builds are at parity or better with the old wheel everywhere.
 
+## Network-filesystem validation (2026-07-06)
+
+Re-validated the big perf changes against a real remote server (~105 ms RTT,
+heavy jitter) via NFS and SSHFS, new build vs pre-fork PyPI wheel, nogil,
+interleaved A/B runs with medians (single uncontrolled runs were badly biased
+by server-cache warmth — do not trust non-interleaved numbers on shared
+links):
+
+- Cold / latency-bound random reads (DROP_AFTER_READ): parity within noise
+  (NFS medians ~170 vs ~150 rec/s; SSHFS same picture). Throughput was capped
+  by the transport (~16 effective concurrent RPCs ≈ server nfsd threads), so
+  the CPU-side changes neither help nor hurt. No regressions.
+- Warm client page cache (SYSTEM policy, epoch cached locally): local
+  findings reproduce exactly on NFS-backed files — `data[i]` from 192
+  threads: new 1.40 M rec/s vs old 0.17 M (8x), and new *scales up* with
+  threads while old collapses (pybind dispatch lock).
+- Takeaway: the wins materialize whenever the bottleneck isn't the wire —
+  cached epochs, fast parallel filesystems, local disk. On a
+  latency-dominated link, server/transport tuning (nfsd threads, nconnect)
+  is what matters.
+
+Bench data left at /mnt/fbi-nfs/sackli_bench/data.bag (100 MB).
+
 ## Speed
 
 ### 1. GIL builds: parallel reads still serialize on per-record allocation **[verified]**

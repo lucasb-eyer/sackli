@@ -12,11 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# The patch caches pybind11's C++-type -> type_info resolution per template
+# instantiation. Without it, every bound-method call resolves the `self` type
+# under pybind11's global internals mutex, which serializes all dispatch on
+# free-threading Python: with ~200 reader threads, per-record reads collapse
+# to ~4x below their 8-thread throughput. See the patch file for details.
 FetchContent_Declare(
   pybind11
   GIT_REPOSITORY https://github.com/pybind/pybind11.git
   GIT_TAG v3.0.0 # v3.0.0
   GIT_SHALLOW TRUE
+  PATCH_COMMAND
+    ${CMAKE_COMMAND}
+    -DPATCH_FILE=${CMAKE_CURRENT_LIST_DIR}/patches/pybind11-cache-type-lookup.patch
+    -P ${CMAKE_CURRENT_LIST_DIR}/patches/apply_patch.cmake
   OVERRIDE_FIND_PACKAGE
   EXCLUDE_FROM_ALL
 )

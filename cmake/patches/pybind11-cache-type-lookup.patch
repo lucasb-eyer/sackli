@@ -1,0 +1,49 @@
+diff --git a/include/pybind11/detail/type_caster_base.h b/include/pybind11/detail/type_caster_base.h
+index 1b23c5c..6d03394 100644
+--- a/include/pybind11/detail/type_caster_base.h
++++ b/include/pybind11/detail/type_caster_base.h
+@@ -22,6 +22,7 @@
+ #include "using_smart_holder.h"
+ #include "value_and_holder.h"
+ 
++#include <atomic>
+ #include <cstdint>
+ #include <cstring>
+ #include <iterator>
+@@ -867,6 +868,9 @@ public:
+     explicit type_caster_generic(const type_info *typeinfo)
+         : typeinfo(typeinfo), cpptype(typeinfo ? typeinfo->cpptype : nullptr) {}
+ 
++    type_caster_generic(const type_info *typeinfo, const std::type_info &cpp_type_info)
++        : typeinfo(typeinfo), cpptype(&cpp_type_info) {}
++
+     bool load(handle src, bool convert) { return load_impl<type_caster_generic>(src, convert); }
+ 
+     PYBIND11_NOINLINE static handle cast(const void *_src,
+@@ -1476,9 +1480,25 @@ class type_caster_base : public type_caster_generic {
+ public:
+     static constexpr auto name = const_name<type>();
+ 
+-    type_caster_base() : type_caster_base(typeid(type)) {}
++    type_caster_base() : type_caster_generic(cached_type_info(), typeid(type)) {}
+     explicit type_caster_base(const std::type_info &info) : type_caster_generic(info) {}
+ 
++    // Resolving the type_info via get_type_info takes a global mutex on every
++    // call, which serializes all cross-thread dispatch on free-threading
++    // builds. The registration for a given C++ type is stable once it exists,
++    // so resolve it once per template instantiation and cache it.
++    static const type_info *cached_type_info() {
++        static std::atomic<const type_info *> cached{nullptr};
++        const type_info *ti = cached.load(std::memory_order_acquire);
++        if (ti == nullptr) {
++            ti = get_type_info(typeid(type));
++            if (ti != nullptr) {
++                cached.store(ti, std::memory_order_release);
++            }
++        }
++        return ti;
++    }
++
+     static handle cast(const itype &src, return_value_policy policy, handle parent) {
+         if (policy == return_value_policy::automatic
+             || policy == return_value_policy::automatic_reference) {
