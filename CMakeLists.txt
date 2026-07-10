@@ -52,6 +52,18 @@ set(CMAKE_SKIP_INSTALL_RULES OFF)
 
 check_cxx_source_compiles(
   [=[
+    #include <memory>
+
+    int main() {
+      auto buffer = std::make_shared_for_overwrite<char[]>(1);
+      return buffer != nullptr ? 0 : 1;
+    }
+  ]=]
+  SACKLI_HAVE_MAKE_SHARED_FOR_OVERWRITE
+)
+
+check_cxx_source_compiles(
+  [=[
     #include <fcntl.h>
     #include <sys/types.h>
 
@@ -267,6 +279,16 @@ sackli_pybind11_extension(
     absl::strings
     sackli_core
 )
+
+if(SACKLI_HAVE_MAKE_SHARED_FOR_OVERWRITE)
+  target_compile_definitions(
+    sackli PRIVATE SACKLI_HAVE_MAKE_SHARED_FOR_OVERWRITE=1
+  )
+else()
+  target_compile_definitions(
+    sackli PRIVATE SACKLI_HAVE_MAKE_SHARED_FOR_OVERWRITE=0
+  )
+endif()
 
 if(BUILD_TESTING)
   add_executable(

@@ -8,7 +8,7 @@ on:
 jobs:
   build-sdist:
     name: build-sdist
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -31,7 +31,7 @@ jobs:
 
   build-wheels:
     name: build-wheel (${{ matrix.build }})
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -105,7 +105,7 @@ jobs:
       - build-sdist
       - build-wheels
       - build-wheels-macos
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     permissions:
       id-token: write
     environment:

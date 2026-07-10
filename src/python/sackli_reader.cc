@@ -135,12 +135,16 @@ struct RawRecord {
 };
 
 RawRecord MakeRawRecordOfSize(size_t num_bytes) {
-  // Use an array shared_ptr directly for compatibility with GCC 11, whose
-  // C++20 library does not provide make_shared_for_overwrite.
-  return RawRecord{
-      num_bytes > 0 ? std::shared_ptr<char[]>(new char[num_bytes])
-                    : nullptr,
-      num_bytes};
+  std::shared_ptr<char[]> data;
+  if (num_bytes > 0) {
+#if SACKLI_HAVE_MAKE_SHARED_FOR_OVERWRITE
+    data = std::make_shared_for_overwrite<char[]>(num_bytes);
+#else
+    // Older standard libraries do not provide make_shared_for_overwrite.
+    data = std::shared_ptr<char[]>(new char[num_bytes]);
+#endif
+  }
+  return RawRecord{std::move(data), num_bytes};
 }
 
 // Counterpart of IndexedAllocator/IndexedCopy for RawRecords; runs entirely
