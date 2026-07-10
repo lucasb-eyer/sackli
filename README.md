@@ -13,7 +13,7 @@ Additions so far:
 - Add macOS support and wheels.
 - Add CI, stress-tests and automatic wheel releases to PyPI for Linux x86_64 and macOS arm64 (macOS 14+).
 
-Versioning of this fork is detached from the original bagz library at the point it was forked (v0.2.0).
+Säckli uses independent semantic versioning and does not track upstream Bagz releases.
 
 ## Overview
 
