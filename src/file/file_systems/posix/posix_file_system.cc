@@ -494,7 +494,13 @@ struct DirectIoAlignments {
 #if defined(STATX_DIOALIGN)
 absl::StatusOr<DirectIoAlignments> QueryDirectIoAlignments(int fd) {
   struct statx statx_buffer = {};
-  if (statx(fd, "", AT_EMPTY_PATH, STATX_DIOALIGN, &statx_buffer) != 0) {
+  constexpr unsigned int statx_mask =
+#if SACKLI_HAVE_STATX_DIO_READ_ALIGN
+      STATX_DIOALIGN | STATX_DIO_READ_ALIGN;
+#else
+      STATX_DIOALIGN;
+#endif
+  if (statx(fd, "", AT_EMPTY_PATH, statx_mask, &statx_buffer) != 0) {
     return absl::ErrnoToStatus(errno, "statx(STATX_DIOALIGN)");
   }
   if ((statx_buffer.stx_mask & STATX_DIOALIGN) == 0 ||
@@ -510,10 +516,14 @@ absl::StatusOr<DirectIoAlignments> QueryDirectIoAlignments(int fd) {
   const size_t mem_align =
       std::max(static_cast<size_t>(statx_buffer.stx_dio_mem_align),
                PageSize());
+#if SACKLI_HAVE_STATX_DIO_READ_ALIGN
   const size_t read_align =
       statx_buffer.stx_dio_read_offset_align != 0
           ? statx_buffer.stx_dio_read_offset_align
           : statx_buffer.stx_dio_offset_align;
+#else
+  const size_t read_align = statx_buffer.stx_dio_offset_align;
+#endif
   if (!std::has_single_bit(mem_align) || !std::has_single_bit(read_align)) {
     return absl::FailedPreconditionError(
         "Direct I/O alignments must be powers of two.");

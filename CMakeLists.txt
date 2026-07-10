@@ -64,6 +64,19 @@ check_cxx_source_compiles(
 
 check_cxx_source_compiles(
   [=[
+    #include <linux/stat.h>
+
+    int main() {
+      struct statx statx_buffer = {};
+      return static_cast<int>(STATX_DIO_READ_ALIGN) +
+             static_cast<int>(statx_buffer.stx_dio_read_offset_align);
+    }
+  ]=]
+  SACKLI_HAVE_STATX_DIO_READ_ALIGN
+)
+
+check_cxx_source_compiles(
+  [=[
     #include <fcntl.h>
     #include <sys/types.h>
 
@@ -161,6 +174,7 @@ target_compile_definitions(
     SACKLI_HAVE_F_NOCACHE=$<BOOL:${SACKLI_HAVE_F_NOCACHE}>
     SACKLI_HAVE_MAP_NOCACHE=$<BOOL:${SACKLI_HAVE_MAP_NOCACHE}>
     SACKLI_HAVE_MADV_DONTNEED=$<BOOL:${SACKLI_HAVE_MADV_DONTNEED}>
+    SACKLI_HAVE_STATX_DIO_READ_ALIGN=$<BOOL:${SACKLI_HAVE_STATX_DIO_READ_ALIGN}>
 )
 
 
