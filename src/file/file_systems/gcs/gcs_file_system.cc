@@ -96,6 +96,9 @@ class GcsPReadFile : public PReadFile {
           "Invalid range: offset > file size - size (here: ", offset, " > ",
           size() - num_bytes, ")"));
     }
+    if (num_bytes == 0) {
+      return absl::OkStatus();
+    }
 
     gcs::ObjectReadStream reader = client_->ReadObject(
         bucket_name_, object_name_, gcs::ReadRange(offset, offset + num_bytes));
