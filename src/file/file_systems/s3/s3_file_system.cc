@@ -70,6 +70,34 @@ absl::Status ConvertAwsError(const Aws::Client::AWSError<Aws::S3::S3Errors>& err
   }
 }
 
+bool MatchesShardObject(absl::string_view object, absl::string_view prefix,
+                        absl::string_view suffix) {
+  // <prefix>-00000-of-00000<suffix>
+  constexpr size_t kShardMiddleSize = 15;
+  if (object.size() != prefix.size() + kShardMiddleSize + suffix.size() ||
+      object.substr(0, prefix.size()) != prefix ||
+      object.substr(object.size() - suffix.size()) != suffix) {
+    return false;
+  }
+
+  absl::string_view middle = object.substr(prefix.size(), kShardMiddleSize);
+  if (middle[0] != '-' || middle[6] != '-' || middle[7] != 'o' ||
+      middle[8] != 'f' || middle[9] != '-') {
+    return false;
+  }
+  for (size_t i = 1; i <= 5; ++i) {
+    if (middle[i] < '0' || middle[i] > '9') {
+      return false;
+    }
+  }
+  for (size_t i = 10; i < kShardMiddleSize; ++i) {
+    if (middle[i] < '0' || middle[i] > '9') {
+      return false;
+    }
+  }
+  return true;
+}
+
 // A reference to an S3 object. This reference allows random access to the
 // content of the object. Note that changes to the file made in-between reads
 // are not checked, which can cause race condition. Only out of range reads are
@@ -100,6 +128,9 @@ class S3PReadFile : public PReadFile {
       return absl::OutOfRangeError(absl::StrCat(
           "Invalid range: offset > file size - size (here: ", offset, " > ",
           size() - num_bytes, ")"));
+    }
+    if (num_bytes == 0) {
+      return absl::OkStatus();
     }
 
     Aws::S3::Model::GetObjectRequest request;
@@ -307,22 +338,31 @@ S3FileSystem::BulkOpenPRead(absl::string_view filespec_without_prefix,
             absl::string_view filespec = expanded_filespec[filespec_index];
             std::string pattern;
             std::string prefix;
+            std::string shard_prefix;
+            std::string shard_suffix;
+            bool is_shard_glob = false;
 
             if (absl::string_view::size_type pos = filespec.rfind("@*");
                 pos != absl::string_view::npos) {
               absl::string_view prefix_view = filespec.substr(0, pos);
               absl::string_view suffix = filespec.substr(pos + 2);
+              const BucketObject prefix_object =
+                  BucketAndObjectName(prefix_view);
               pattern = absl::StrCat(
                   prefix_view,
                   "-[0-9][0-9][0-9][0-9][0-9]-of-[0-9][0-9][0-9][0-9][0-9]",
                   suffix);
               prefix = std::string(prefix_view);
+              shard_prefix = prefix_object.object;
+              shard_suffix = std::string(suffix);
+              is_shard_glob = true;
             } else {
               pattern = filespec;
               prefix = filespec;
             }
 
             const BucketObject bucket_object = BucketAndObjectName(prefix);
+            const BucketObject pattern_object = BucketAndObjectName(pattern);
 
             Aws::S3::Model::ListObjectsV2Request request;
             request.SetBucket(bucket_object.bucket);
@@ -343,6 +383,13 @@ S3FileSystem::BulkOpenPRead(absl::string_view filespec_without_prefix,
               const auto& result = outcome.GetResult();
               for (const auto& object : result.GetContents()) {
                 const std::string& key = object.GetKey();
+                const bool matches =
+                    is_shard_glob
+                        ? MatchesShardObject(key, shard_prefix, shard_suffix)
+                        : key == pattern_object.object;
+                if (!matches) {
+                  continue;
+                }
                 file_names.emplace_back(key);
                 files.push_back(std::make_unique<S3PReadFile>(
                     client, bucket_object.bucket, key, object.GetSize()));
