@@ -151,10 +151,6 @@ class S3WriteFile : public WriteFile {
   }
 
   absl::Status Flush() override {
-    if (buffer_.empty()) {
-      return absl::OkStatus();
-    }
-
     Aws::S3::Model::PutObjectRequest request;
     request.SetBucket(bucket_);
     request.SetKey(key_);
@@ -168,7 +164,9 @@ class S3WriteFile : public WriteFile {
       return ConvertAwsError(outcome.GetError());
     }
 
-    buffer_.clear();
+    // PutObject replaces the complete object; retaining the buffer is
+    // necessary so a later Flush does not discard data uploaded by an earlier
+    // one. S3 writes are intentionally buffered in memory until Close.
     return absl::OkStatus();
   }
 
