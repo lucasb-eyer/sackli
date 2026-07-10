@@ -135,8 +135,10 @@ struct RawRecord {
 };
 
 RawRecord MakeRawRecordOfSize(size_t num_bytes) {
+  // Use an array shared_ptr directly for compatibility with GCC 11, whose
+  // C++20 library does not provide make_shared_for_overwrite.
   return RawRecord{
-      num_bytes > 0 ? std::make_shared_for_overwrite<char[]>(num_bytes)
+      num_bytes > 0 ? std::shared_ptr<char[]>(new char[num_bytes])
                     : nullptr,
       num_bytes};
 }
