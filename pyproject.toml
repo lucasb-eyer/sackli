@@ -51,6 +51,7 @@ cmake.args = ["-Wno-dev"]
 # Keep the 2_28 baseline for openssl3, but let cibuildwheel pick a current
 # official image so new Python interpreters (for example 3.14) are available.
 manylinux-x86_64-image = "manylinux_2_28"
+manylinux-aarch64-image = "manylinux_2_28"
 build = "cp312-* cp313-* cp314-* cp314t-*"
 build-frontend = "build[uv]"
 build-verbosity = 1

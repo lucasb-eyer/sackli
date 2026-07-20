@@ -11,7 +11,8 @@ Additions so far:
 - Make it compatible to Python versions past 3.13.
 - Make it compatible with free-threading (nogil) Python.
 - Add macOS support and wheels.
-- Add CI, stress-tests and automatic wheel releases to PyPI for Linux x86_64 and macOS arm64 (macOS 14+).
+- Add CI, stress-tests and automatic wheel releases to PyPI for Linux x86_64,
+  Linux aarch64, and macOS arm64 (macOS 14+).
 
 Säckli uses independent semantic versioning and does not track upstream Bagz releases.
 
@@ -24,7 +25,8 @@ All indexing is zero based.
 ## Installation
 
 The recommended installation on Linux and Mac is via the pre-built wheels on PyPI.
-PyPI currently ships Linux x86_64 wheels and macOS arm64 wheels for macOS 14+:
+Releases include Linux x86_64 and aarch64 wheels, plus macOS arm64 wheels for
+macOS 14+:
 
 ```sh
 uv pip install sackli
