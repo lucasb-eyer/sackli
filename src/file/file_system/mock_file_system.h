@@ -179,7 +179,7 @@ class MockFileSystem : public FileSystem {
       absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>>,
       BulkOpenPRead,
       (absl::string_view filespec_without_prefix,
-       const PReadOpenOptions& options),
+       const PReadOpenOptions& options, int max_parallelism),
       (const, override));
 };
 

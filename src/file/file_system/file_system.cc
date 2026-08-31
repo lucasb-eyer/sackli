@@ -30,15 +30,10 @@
 
 namespace sackli {
 
-namespace {
-
-constexpr int kMaxParallelism = 100;
-
-}  // namespace
-
 absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>>
 FileSystem::BulkOpenPRead(absl::string_view filespec_without_prefix,
-                          const PReadOpenOptions& options) const {
+                          const PReadOpenOptions& options,
+                          int max_parallelism) const {
   std::vector<std::string> filenames = ExpandShardSpec(filespec_without_prefix);
   std::vector<std::unique_ptr<PReadFile>> files(filenames.size());
   if (absl::Status status = internal::ParallelDo(
@@ -54,7 +49,7 @@ FileSystem::BulkOpenPRead(absl::string_view filespec_without_prefix,
             files[file_index] = *std::move(file);
             return absl::OkStatus();
           },
-          /* max_parallelism */ kMaxParallelism, /*cpu_bound=*/false);
+          max_parallelism, /*cpu_bound=*/false);
       !status.ok()) {
     return status;
   }

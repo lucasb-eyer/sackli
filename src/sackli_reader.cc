@@ -151,14 +151,16 @@ absl::StatusOr<ReaderHandleBatch> OpenFilesForFileSpecBatch(
     const SackliReader::Options& options) {
   const std::string batch_file_spec = absl::StrJoin(file_specs, ",");
   absl::StatusOr<std::vector<std::unique_ptr<PReadFile>>> record_files =
-      file::BulkOpenPRead(batch_file_spec, RecordFileOpenOptions(options));
+      file::BulkOpenPRead(batch_file_spec, RecordFileOpenOptions(options),
+                          options.max_parallelism);
   if (!record_files.ok()) {
     return record_files.status();
   }
 
   if (options.limits_placement == LimitsPlacement::kSeparate) {
     absl::StatusOr<std::vector<std::unique_ptr<PReadFile>>> limits_files =
-        file::BulkOpenPRead(LimitsFileSpecList(file_specs));
+        file::BulkOpenPRead(LimitsFileSpecList(file_specs), {},
+                            options.max_parallelism);
     if (!limits_files.ok()) {
       return limits_files.status();
     }
@@ -171,7 +173,8 @@ absl::StatusOr<ReaderHandleBatch> OpenFilesForFileSpecBatch(
   if (use_separate_tail_limit_source_handles) {
     absl::StatusOr<std::vector<std::unique_ptr<PReadFile>>>
         opened_tail_limit_source_files = file::BulkOpenPRead(
-            batch_file_spec, TailLimitSourceOpenOptions(options));
+            batch_file_spec, TailLimitSourceOpenOptions(options),
+            options.max_parallelism);
     if (!opened_tail_limit_source_files.ok()) {
       return opened_tail_limit_source_files.status();
     }

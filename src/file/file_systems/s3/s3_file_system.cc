@@ -48,8 +48,6 @@
 namespace sackli {
 namespace {
 
-constexpr int kMaxParallelism = 100;
-
 struct BucketObject {
   const std::string bucket;
   const std::string object;
@@ -322,7 +320,8 @@ absl::Status S3FileSystem::Delete(absl::string_view filename_without_prefix,
 
 absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>>
 S3FileSystem::BulkOpenPRead(absl::string_view filespec_without_prefix,
-                            const PReadOpenOptions& options) const {
+                            const PReadOpenOptions& options,
+                            int max_parallelism) const {
   (void)options;
   std::vector<std::string> expanded_filespec =
       ExpandShardSpec(filespec_without_prefix);
@@ -410,7 +409,7 @@ S3FileSystem::BulkOpenPRead(absl::string_view filespec_without_prefix,
 
             return absl::OkStatus();
           },
-          kMaxParallelism, /*cpu_bound=*/false);
+          max_parallelism, /*cpu_bound=*/false);
       !status.ok()) {
     return status;
   }

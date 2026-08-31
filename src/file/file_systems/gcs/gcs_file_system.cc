@@ -50,8 +50,6 @@
 namespace sackli {
 namespace {
 
-constexpr int kMaxParallelism = 100;
-
 namespace gc = ::google::cloud;
 namespace gcs = gc::storage;
 
@@ -219,7 +217,8 @@ absl::Status GcsFileSystem::Delete(absl::string_view filename_without_prefix,
 
 absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>>
 GcsFileSystem::BulkOpenPRead(absl::string_view filespec_without_prefix,
-                             const PReadOpenOptions& options) const {
+                             const PReadOpenOptions& options,
+                             int max_parallelism) const {
   (void)options;
   std::vector<std::string> expanded_filespec =
       ExpandShardSpec(filespec_without_prefix);
@@ -272,7 +271,7 @@ GcsFileSystem::BulkOpenPRead(absl::string_view filespec_without_prefix,
 
             return absl::OkStatus();
           },
-          kMaxParallelism, /*cpu_bound=*/false);
+          max_parallelism, /*cpu_bound=*/false);
       !status.ok()) {
     return status;
   }

@@ -61,10 +61,12 @@ class FileSystem {
 
   // Opens a set of files for reading. See file_system/shard_spec.h for details
   // on the filespec format. `options` are best-effort read hints that a
-  // file-system may honor or ignore.
+  // file-system may honor or ignore. `max_parallelism` limits the number of
+  // files opened concurrently.
   virtual absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>>
   BulkOpenPRead(absl::string_view filespec_without_prefix,
-                const PReadOpenOptions& options) const;
+                const PReadOpenOptions& options,
+                int max_parallelism = 100) const;
 
   // Returns whether two read views with different options need distinct file
   // handles for this filesystem. Filesystems that ignore read hints can return

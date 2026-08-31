@@ -82,9 +82,10 @@ absl::Status Delete(absl::string_view filename_with_prefix,
 // Comma separated file_specs are allowed to have different prefixes.
 //
 // `options` are best-effort read hints for the underlying file system.
+// `max_parallelism` limits the number of files opened concurrently.
 absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>>
 BulkOpenPRead(absl::string_view file_spec_with_prefix,
-              PReadOpenOptions options = {});
+              PReadOpenOptions options = {}, int max_parallelism = 100);
 
 }  // namespace sackli::file
 

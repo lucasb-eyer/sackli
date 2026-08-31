@@ -17,11 +17,14 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
 #include <memory>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -47,6 +50,7 @@ namespace {
 struct Call {
   std::string filespec;
   PReadOpenOptions options;
+  int max_parallelism = 100;
 };
 
 struct TempFile {
@@ -104,9 +108,10 @@ class RecordingFileSystem : public FileSystem {
 
   absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>>
   BulkOpenPRead(absl::string_view filespec_without_prefix,
-                const PReadOpenOptions& options) const override {
-    calls.push_back(
-        Call{std::string(filespec_without_prefix), options});
+                const PReadOpenOptions& options,
+                int max_parallelism) const override {
+    calls.push_back(Call{std::string(filespec_without_prefix), options,
+                         max_parallelism});
     const size_t count =
         filespec_without_prefix.empty()
             ? 0
@@ -133,9 +138,10 @@ class RecordingPosixFileSystem : public PosixFileSystem {
 
   absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>>
   BulkOpenPRead(absl::string_view filespec_without_prefix,
-                const PReadOpenOptions& options) const override {
-    calls.push_back(
-        Call{std::string(filespec_without_prefix), options});
+                const PReadOpenOptions& options,
+                int max_parallelism) const override {
+    calls.push_back(Call{std::string(filespec_without_prefix), options,
+                         max_parallelism});
     const size_t count =
         filespec_without_prefix.empty()
             ? 0
@@ -146,6 +152,39 @@ class RecordingPosixFileSystem : public PosixFileSystem {
   }
 
   mutable std::vector<Call> calls;
+};
+
+class ConcurrencyRecordingFileSystem : public FileSystem {
+ public:
+  absl::StatusOr<absl_nonnull std::unique_ptr<PReadFile>> OpenPRead(
+      absl::string_view filename_without_prefix,
+      const PReadOpenOptions& options) const override {
+    const int active = active_opens_.fetch_add(1) + 1;
+    int observed_max = max_active_opens_.load();
+    while (active > observed_max &&
+           !max_active_opens_.compare_exchange_weak(observed_max, active)) {
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    active_opens_.fetch_sub(1);
+    return std::make_unique<StringPReadFile>("");
+  }
+
+  absl::StatusOr<absl_nonnull std::unique_ptr<WriteFile>> OpenWrite(
+      absl::string_view filename_without_prefix, uint64_t offset,
+      absl::string_view options) const override {
+    return absl::UnimplementedError("OpenWrite should not be called");
+  }
+
+  absl::Status Delete(absl::string_view filename_without_prefix,
+                      absl::string_view options) const override {
+    return absl::UnimplementedError("Delete should not be called");
+  }
+
+  int max_active_opens() const { return max_active_opens_.load(); }
+
+ private:
+  mutable std::atomic<int> active_opens_ = 0;
+  mutable std::atomic<int> max_active_opens_ = 0;
 };
 
 bool Expect(bool condition, absl::string_view message) {
@@ -172,6 +211,11 @@ bool ExpectCalls(absl::Span<const Call> actual, absl::Span<const Call> expected,
                 absl::StrCat(test_name, ": wrong options in call ", i))) {
       return false;
     }
+    if (!Expect(actual[i].max_parallelism == expected[i].max_parallelism,
+                absl::StrCat(test_name,
+                             ": wrong max_parallelism in call ", i))) {
+      return false;
+    }
   }
   return true;
 }
@@ -184,6 +228,17 @@ bool IsDirectIoUnsupported(const absl::Status& status) {
          (absl::StrContains(status.message(), "Direct I/O") ||
           absl::StrContains(status.message(), "O_DIRECT") ||
           absl::StrContains(status.message(), "STATX_DIOALIGN"));
+}
+
+bool TestBulkOpenHonorsMaxParallelism() {
+  ConcurrencyRecordingFileSystem file_system;
+  absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>> files =
+      file_system.BulkOpenPRead("a,b,c,d", {}, /*max_parallelism=*/1);
+  return Expect(files.ok(), "bulk-open-parallelism: open failed") &&
+         Expect(files->size() == 4,
+                "bulk-open-parallelism: wrong number of files") &&
+         Expect(file_system.max_active_opens() == 1,
+                "bulk-open-parallelism: files were opened concurrently");
 }
 
 std::string MakePatternPayload(size_t size) {
@@ -241,6 +296,7 @@ bool TestTailUsesSeparateLimitHandlesForPosixFiles() {
       .compression = CompressionNone{},
       .access_pattern = AccessPattern::kRandom,
       .cache_policy = CachePolicy::kDropAfterRead,
+      .max_parallelism = 1,
   };
   absl::StatusOr<SackliReader> reader =
       SackliReader::Open("record_posix:data.bagz", std::move(options));
@@ -253,9 +309,11 @@ bool TestTailUsesSeparateLimitHandlesForPosixFiles() {
        .options =
            {.access_pattern = AccessPattern::kRandom,
             .cache_policy = CachePolicy::kDropAfterRead,
-            .prefer_streaming = true}},
+            .prefer_streaming = true},
+       .max_parallelism = 1},
       {.filespec = "data.bagz",
-       .options = {.access_pattern = AccessPattern::kRandom}},
+       .options = {.access_pattern = AccessPattern::kRandom},
+       .max_parallelism = 1},
   };
   return ExpectCalls(file_system.calls, expected, "tail-posix");
 }
@@ -314,6 +372,7 @@ bool TestSeparateLimitsKeepDefaultReadOptions() {
       .limits_placement = LimitsPlacement::kSeparate,
       .compression = CompressionNone{},
       .access_pattern = AccessPattern::kSequential,
+      .max_parallelism = 3,
   };
   absl::StatusOr<SackliReader> reader =
       SackliReader::Open("record_posix:a.bag,record_posix:b.bag",
@@ -324,8 +383,11 @@ bool TestSeparateLimitsKeepDefaultReadOptions() {
   }
   const Call expected[] = {
       {.filespec = "a.bag,b.bag",
-       .options = {.access_pattern = AccessPattern::kSequential}},
-      {.filespec = "limits.a.bag,limits.b.bag", .options = {}},
+       .options = {.access_pattern = AccessPattern::kSequential},
+       .max_parallelism = 3},
+      {.filespec = "limits.a.bag,limits.b.bag",
+       .options = {},
+       .max_parallelism = 3},
   };
   return ExpectCalls(file_system.calls, expected, "separate-limits");
 }
@@ -828,7 +890,8 @@ bool TestClosedReaderOperationsFail() {
 }  // namespace
 
 int RunTests() {
-  const bool ok = TestTailUsesSeparateLimitHandlesForPosixFiles() &&
+  const bool ok = TestBulkOpenHonorsMaxParallelism() &&
+                  TestTailUsesSeparateLimitHandlesForPosixFiles() &&
                   TestTailUsesSeparateLimitHandlesForDirectIoPosixFiles() &&
                   TestTailReusesRecordHandleForAccessPatternOnly() &&
                   TestSeparateLimitsKeepDefaultReadOptions() &&

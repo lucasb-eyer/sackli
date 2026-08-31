@@ -67,7 +67,8 @@ class S3FileSystem : public FileSystem {
   // the leading `s3:`.
   absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>>
   BulkOpenPRead(absl::string_view filespec_without_prefix,
-                const PReadOpenOptions& options) const override;
+                const PReadOpenOptions& options,
+                int max_parallelism) const override;
 
  private:
   std::shared_ptr<Aws::S3::S3Client> Client() const;
