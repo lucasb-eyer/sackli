@@ -215,9 +215,10 @@ accept the case-insensitive name of an enum value (e.g. `'random'`,
     *   `sackli.CachePolicy.DIRECT_IO`: Uses `O_DIRECT` on Linux and `F_NOCACHE`
         on macOS to read records. This is the most aggressive os-cache avoidance
         option and can be best for random reads on huge data with rare re-reads.
-        Linux uses `STATX_DIOALIGN` if supported, otherwise probes from a conservative
-        page-aligned starting point derived from file/filesystem metadata.
-        For the unaligned tail, it does a one-time standard read at init.
+        Linux empirically probes direct-I/O alignment from 512 bytes, caches the
+        result per device, and treats `STATX_DIOALIGN` only as a hint. If direct
+        I/O cannot be validated, it falls back to `pread` with cache-dropping
+        advice. For the unaligned tail, it does a one-time standard read at init.
 *   `max_parallelism`: Default number of threads when reading many records.
 *   `read_ahead_bytes`: Byte budget that sizes the record batches the
     iterators read ahead (default 1 MiB). For compressed files, the budget

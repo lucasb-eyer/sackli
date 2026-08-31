@@ -14,13 +14,12 @@
 
 #include "src/file/file_systems/posix/posix_file_system.h"
 
-#include <bit>
 #include <algorithm>
+#include <bit>
 #include <fcntl.h>
 #include <glob.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
-#include <sys/statvfs.h>
 #include <unistd.h>
 
 #include <cerrno>
@@ -30,7 +29,9 @@
 #include <cstdlib>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -454,20 +455,57 @@ class OwnedAlignedBuffer {
     if (err != 0) {
       return absl::ErrnoToStatus(err, "posix_memalign");
     }
-    return OwnedAlignedBuffer(static_cast<char*>(data), size);
+    return OwnedAlignedBuffer(data, static_cast<char*>(data), size);
   }
 
-  ~OwnedAlignedBuffer() { std::free(data_); }
+  // Allocates an address divisible by `alignment`, but not by twice that
+  // value. This prevents a probe for a small candidate from accidentally
+  // satisfying a stricter buffer-address requirement.
+  static absl::StatusOr<OwnedAlignedBuffer> AllocateExactlyAligned(
+      size_t size, size_t alignment) {
+    if (alignment == 0 || !std::has_single_bit(alignment) ||
+        alignment > std::numeric_limits<size_t>::max() / 2 ||
+        size > std::numeric_limits<size_t>::max() - alignment) {
+      return absl::InvalidArgumentError(
+          "Exact buffer alignment must be a non-overflowing power of two.");
+    }
+
+    void* allocation = nullptr;
+    const size_t required_alignment = std::max(alignment, sizeof(void*));
+    const int err =
+        posix_memalign(&allocation, required_alignment, size + alignment);
+    if (err != 0) {
+      return absl::ErrnoToStatus(err, "posix_memalign");
+    }
+
+    char* data = static_cast<char*>(allocation);
+    const uintptr_t double_alignment = 2 * alignment;
+    if (reinterpret_cast<uintptr_t>(data) % double_alignment == 0) {
+      data += alignment;
+    }
+    const uintptr_t address = reinterpret_cast<uintptr_t>(data);
+    if (address % alignment != 0 || address % double_alignment == 0) {
+      std::free(allocation);
+      return absl::InternalError(
+          "Failed to construct an exactly aligned probe buffer.");
+    }
+    return OwnedAlignedBuffer(allocation, data, size);
+  }
+
+  ~OwnedAlignedBuffer() { std::free(allocation_); }
 
   OwnedAlignedBuffer(const OwnedAlignedBuffer&) = delete;
   OwnedAlignedBuffer& operator=(const OwnedAlignedBuffer&) = delete;
 
   OwnedAlignedBuffer(OwnedAlignedBuffer&& other) noexcept
-      : data_(std::exchange(other.data_, nullptr)), size_(other.size_) {}
+      : allocation_(std::exchange(other.allocation_, nullptr)),
+        data_(std::exchange(other.data_, nullptr)),
+        size_(other.size_) {}
 
   OwnedAlignedBuffer& operator=(OwnedAlignedBuffer&& other) noexcept {
     if (this != &other) {
-      std::free(data_);
+      std::free(allocation_);
+      allocation_ = std::exchange(other.allocation_, nullptr);
       data_ = std::exchange(other.data_, nullptr);
       size_ = other.size_;
     }
@@ -478,8 +516,10 @@ class OwnedAlignedBuffer {
   size_t size() const { return size_; }
 
  private:
-  OwnedAlignedBuffer(char* data, size_t size) : data_(data), size_(size) {}
+  OwnedAlignedBuffer(void* allocation, char* data, size_t size)
+      : allocation_(allocation), data_(data), size_(size) {}
 
+  void* allocation_ = nullptr;
   char* data_ = nullptr;
   size_t size_ = 0;
 };
@@ -488,11 +528,12 @@ class OwnedAlignedBuffer {
 
 struct DirectIoAlignments {
   size_t mem_align;
-  size_t read_align;
+  size_t offset_align;
+  size_t length_align;
 };
 
 #if defined(STATX_DIOALIGN)
-absl::StatusOr<DirectIoAlignments> QueryDirectIoAlignments(int fd) {
+absl::StatusOr<DirectIoAlignments> QueryDirectIoAlignmentHint(int fd) {
   struct statx statx_buffer = {};
   constexpr unsigned int statx_mask =
 #if SACKLI_HAVE_STATX_DIO_READ_ALIGN
@@ -510,17 +551,14 @@ absl::StatusOr<DirectIoAlignments> QueryDirectIoAlignments(int fd) {
         "Direct I/O alignment info unavailable for this file.");
   }
 
-  // Some filesystems accept smaller alignments but still appear to service
-  // O_DIRECT into page-aligned DMA units. Keep user buffers page-aligned even
-  // when the reported minimum memory alignment is smaller.
-  const size_t mem_align =
-      std::max(static_cast<size_t>(statx_buffer.stx_dio_mem_align),
-               PageSize());
+  const size_t mem_align = statx_buffer.stx_dio_mem_align;
 #if SACKLI_HAVE_STATX_DIO_READ_ALIGN
+  const bool has_read_alignment =
+      (statx_buffer.stx_mask & STATX_DIO_READ_ALIGN) != 0 &&
+      statx_buffer.stx_dio_read_offset_align != 0;
   const size_t read_align =
-      statx_buffer.stx_dio_read_offset_align != 0
-          ? statx_buffer.stx_dio_read_offset_align
-          : statx_buffer.stx_dio_offset_align;
+      has_read_alignment ? statx_buffer.stx_dio_read_offset_align
+                         : statx_buffer.stx_dio_offset_align;
 #else
   const size_t read_align = statx_buffer.stx_dio_offset_align;
 #endif
@@ -528,146 +566,107 @@ absl::StatusOr<DirectIoAlignments> QueryDirectIoAlignments(int fd) {
     return absl::FailedPreconditionError(
         "Direct I/O alignments must be powers of two.");
   }
-  return DirectIoAlignments{.mem_align = mem_align, .read_align = read_align};
+  // statx specifies one read alignment for both file offsets and I/O segment
+  // lengths. Keep the dimensions explicit even though the empirical fallback
+  // intentionally chooses one safe alignment for all three.
+  return DirectIoAlignments{
+      .mem_align = mem_align,
+      .offset_align = read_align,
+      .length_align = read_align,
+  };
 }
 #endif
 
-absl::StatusOr<DirectIoAlignments> ConservativeDirectIoAlignments(int fd) {
-  // Do not use st_blksize here: it is an efficiency hint and can be much
-  // larger than the strict O_DIRECT alignment requirement (for example on
-  // striped filesystems such as Lustre).
-  size_t alignment = std::max(kMinDirectIoAlignment, PageSize());
-
-  struct statvfs statvfs_buffer = {};
-  // If statvfs fails, keep the page-sized fallback and let the safe probe
-  // below validate or reject it during OpenPRead().
-  if (fstatvfs(fd, &statvfs_buffer) == 0) {
-    if (statvfs_buffer.f_bsize > 0) {
-      alignment =
-          std::max(alignment, static_cast<size_t>(statvfs_buffer.f_bsize));
-    }
-    if (statvfs_buffer.f_frsize > 0) {
-      alignment =
-          std::max(alignment, static_cast<size_t>(statvfs_buffer.f_frsize));
-    }
-  }
-
-  if (!std::has_single_bit(alignment)) {
-    alignment = std::bit_ceil(alignment);
-  }
-  return DirectIoAlignments{
-      .mem_align = alignment,
-      .read_align = alignment,
-  };
-}
-
 absl::Status DirectIoProbeFailureStatus(const absl::Status& status,
-                                        size_t alignment, size_t offset) {
+                                        size_t alignment,
+                                        const DirectIoAlignments* statx_hint) {
+  std::string hint_message;
+  if (statx_hint != nullptr) {
+    hint_message = absl::StrCat(
+        " (statx hint: memory=", statx_hint->mem_align,
+        ", offset=", statx_hint->offset_align,
+        ", length=", statx_hint->length_align, ")");
+  }
   return absl::Status(
       status.code(),
       absl::StrCat("Direct I/O probe failed for alignment ", alignment,
-                   " at offset ", offset, ": ", status.message()));
+                   hint_message, ": ", status.message()));
 }
 
 absl::StatusOr<DirectIoAlignments> ProbeDirectIoAlignments(
-    int fd, size_t file_size, size_t start_alignment) {
-  if (start_alignment == 0 || !std::has_single_bit(start_alignment)) {
-    return absl::FailedPreconditionError(
-        "Direct I/O probe requires a power-of-two start alignment.");
-  }
-
-  // Files smaller than the first aligned chunk never issue direct reads at a
-  // nonzero offset because the whole file becomes tail-cached.
-  if (file_size < start_alignment) {
-    return DirectIoAlignments{
-        .mem_align = start_alignment,
-        .read_align = start_alignment,
-    };
-  }
-
-  // This loop grows geometrically, so even very large files only require a
-  // small number of probe attempts.
-  for (size_t alignment = start_alignment; alignment <= file_size;) {
-    bool try_next_alignment = false;
+    int fd, size_t file_size, const DirectIoAlignments* statx_hint) {
+  // Test memory address, file offset, and length together. In particular, the
+  // address is exactly candidate-aligned rather than accidentally satisfying
+  // a larger constraint. statx is diagnostic input only; an empirical read is
+  // required before any alignment is selected.
+  for (size_t alignment = kMinDirectIoAlignment;
+       alignment <= file_size / 2;) {
     absl::StatusOr<OwnedAlignedBuffer> buffer =
-        OwnedAlignedBuffer::Allocate(alignment, alignment);
+        OwnedAlignedBuffer::AllocateExactlyAligned(alignment, alignment);
     if (!buffer.ok()) {
       return buffer.status();
     }
 
-    absl::Status zero_offset_status =
-        DirectPReadExact(fd, 0, absl::Span<char>(buffer->data(), alignment));
-    if (!zero_offset_status.ok()) {
-      if (zero_offset_status.code() == absl::StatusCode::kInvalidArgument) {
-        try_next_alignment = true;
-      } else {
-        return DirectIoProbeFailureStatus(zero_offset_status, alignment, 0);
-      }
-    }
-    if (try_next_alignment) {
-      if (alignment > std::numeric_limits<size_t>::max() / 2) {
-        break;
-      }
-      alignment <<= 1;
-      continue;
-    }
-
-    // Once the remaining non-tail range is smaller than one aligned chunk, all
-    // direct reads come from offset 0 and this alignment is safe even if a
-    // larger nonzero offset would require stricter alignment.
-    if (alignment > file_size / 2) {
+    absl::Status status = DirectPReadExact(
+        fd, alignment, absl::Span<char>(buffer->data(), alignment));
+    if (status.ok()) {
       return DirectIoAlignments{
           .mem_align = alignment,
-          .read_align = alignment,
+          .offset_align = alignment,
+          .length_align = alignment,
       };
     }
-
-    absl::Status nonzero_offset_status =
-        DirectPReadExact(fd, alignment,
-                         absl::Span<char>(buffer->data(), alignment));
-    if (!nonzero_offset_status.ok()) {
-      if (nonzero_offset_status.code() == absl::StatusCode::kInvalidArgument) {
-        try_next_alignment = true;
-      } else {
-        return DirectIoProbeFailureStatus(nonzero_offset_status, alignment,
-                                          alignment);
-      }
+    if (status.code() != absl::StatusCode::kInvalidArgument) {
+      return DirectIoProbeFailureStatus(status, alignment, statx_hint);
     }
-    if (try_next_alignment) {
-      if (alignment > std::numeric_limits<size_t>::max() / 2) {
-        break;
-      }
-      alignment <<= 1;
-      continue;
+    if (alignment > std::numeric_limits<size_t>::max() / 2) {
+      break;
     }
-    return DirectIoAlignments{
-        .mem_align = alignment,
-        .read_align = alignment,
-    };
+    alignment <<= 1;
   }
 
   return absl::FailedPreconditionError(
-      "Direct I/O alignment probing did not find a usable alignment.");
+      "Direct I/O alignment probing did not find a usable alignment before "
+      "reaching the file-size limit.");
 }
 
 absl::StatusOr<DirectIoAlignments> ResolveDirectIoAlignments(int fd,
                                                              size_t file_size) {
+  struct stat stat_buffer = {};
+  if (fstat(fd, &stat_buffer) != 0) {
+    return absl::ErrnoToStatus(errno, "fstat");
+  }
+
+  // Shards on the same mounted device share direct-I/O constraints. Serialize
+  // the first probe so parallel bulk opens do not repeat it for every shard.
+  static std::mutex cache_mutex;
+  static std::unordered_map<dev_t, DirectIoAlignments> alignment_cache;
+  std::lock_guard<std::mutex> lock(cache_mutex);
+  if (auto cached = alignment_cache.find(stat_buffer.st_dev);
+      cached != alignment_cache.end()) {
+    return cached->second;
+  }
+
+  const DirectIoAlignments* statx_hint = nullptr;
 #if defined(STATX_DIOALIGN)
   absl::StatusOr<DirectIoAlignments> statx_alignments =
-      QueryDirectIoAlignments(fd);
+      QueryDirectIoAlignmentHint(fd);
   if (statx_alignments.ok()) {
-    return statx_alignments;
+    statx_hint = &*statx_alignments;
   }
 #endif
-  // Probe from a conservative page-aligned starting point. This preserves
-  // open-time validation while avoiding the unsafe sub-page-aligned buffers
-  // that some filesystems mishandle during O_DIRECT reads.
-  absl::StatusOr<DirectIoAlignments> initial_alignment =
-      ConservativeDirectIoAlignments(fd);
-  if (!initial_alignment.ok()) {
-    return initial_alignment.status();
+  // statx DIO fields are absent at build time on many Lustre/NFS systems and
+  // can be unavailable or zero at runtime, so even a valid-looking result is
+  // only a hint; it never bypasses the empirical probe. Likewise, statvfs
+  // f_bsize/f_frsize are transfer/allocation hints which can be 512 KiB or
+  // 1 MiB on NFS despite byte-granular O_DIRECT, so they are deliberately not
+  // consulted here.
+  absl::StatusOr<DirectIoAlignments> alignments =
+      ProbeDirectIoAlignments(fd, file_size, statx_hint);
+  if (alignments.ok()) {
+    alignment_cache.emplace(stat_buffer.st_dev, *alignments);
   }
-  return ProbeDirectIoAlignments(fd, file_size, initial_alignment->read_align);
+  return alignments;
 }
 
 absl::StatusOr<std::string> ReadTailWithoutCaching(const std::string& filename,
@@ -855,32 +854,50 @@ PosixFileSystem::OpenPRead(absl::string_view filename,
   const PosixReadBackend backend = SelectReadBackend(options);
   if (backend == PosixReadBackend::kDirect) {
 #if defined(__linux__) && defined(O_DIRECT)
+    // Direct I/O is an optimization. If the filesystem cannot support or
+    // validate it, retain the no-cache intent with buffered pread followed by
+    // POSIX_FADV_DONTNEED instead of guessing from filesystem block sizes.
+    auto open_buffered_fallback = [&]()
+        -> absl::StatusOr<absl_nonnull std::unique_ptr<PReadFile>> {
+      absl::StatusOr<ScopedFd> fd = OpenReadOnlyFd(filename_str);
+      if (!fd.ok()) {
+        return fd.status();
+      }
+      absl::StatusOr<size_t> size = FileSize(fd->get());
+      if (!size.ok()) {
+        return size.status();
+      }
+      ApplyFdAccessPattern(fd->get(), options.access_pattern);
+      return std::make_unique<PosixBufferedFdPReadFile>(
+          *std::move(fd), *size,
+          /*drop_after_read=*/SACKLI_HAVE_POSIX_FADVISE);
+    };
+
     absl::StatusOr<ScopedFd> direct_fd = OpenReadOnlyFd(filename_str, O_DIRECT);
     if (!direct_fd.ok()) {
-      return absl::Status(
-          direct_fd.status().code(),
-          absl::StrCat("Direct I/O open failed: ",
-                       direct_fd.status().message()));
+      return open_buffered_fallback();
     }
     absl::StatusOr<size_t> size = FileSize(direct_fd->get());
     if (!size.ok()) {
-      return size.status();
+      return open_buffered_fallback();
     }
     absl::StatusOr<DirectIoAlignments> alignments =
         ResolveDirectIoAlignments(direct_fd->get(), *size);
     if (!alignments.ok()) {
-      return alignments.status();
+      return open_buffered_fallback();
     }
     ApplyFdAccessPattern(direct_fd->get(), options.access_pattern);
-    const size_t tail_start = AlignDown(*size, alignments->read_align);
+    const size_t read_align =
+        std::max(alignments->offset_align, alignments->length_align);
+    const size_t tail_start = AlignDown(*size, read_align);
     absl::StatusOr<std::string> tail_cache =
         ReadTailWithoutCaching(filename_str, *size, tail_start);
     if (!tail_cache.ok()) {
-      return tail_cache.status();
+      return open_buffered_fallback();
     }
     return std::make_unique<PosixDirectPReadFile>(
         *std::move(direct_fd), *size, alignments->mem_align,
-        alignments->read_align, *std::move(tail_cache));
+        read_align, *std::move(tail_cache));
 #elif SACKLI_HAVE_F_NOCACHE
     absl::StatusOr<ScopedFd> direct_fd = OpenReadOnlyFd(filename_str);
     if (!direct_fd.ok()) {
