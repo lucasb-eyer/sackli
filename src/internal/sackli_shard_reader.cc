@@ -14,6 +14,7 @@
 
 #include "src/internal/sackli_shard_reader.h"
 
+#include <algorithm>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -34,6 +35,27 @@
 
 namespace sackli::internal {
 namespace {
+
+// Keep remote range requests and any buffers owned by their implementations
+// bounded while still using reads large enough for an intentional sequential
+// warm-up.
+constexpr size_t kWarmLimitsReadBytes = 64 * 1024 * 1024;
+
+// A POSIX mmap PRead returns a string_view without faulting its pages. Touch at
+// least one byte in every supported-system page so WarmLimits means that the
+// read has actually happened before it returns. Other PRead implementations
+// have already fetched the bytes, and the extra touches are cheap relative to
+// the I/O being requested.
+void TouchForWarm(absl::string_view piece) {
+  constexpr size_t kTouchStride = 4096;
+  const volatile char* data = piece.data();
+  for (size_t offset = 0; offset < piece.size(); offset += kTouchStride) {
+    static_cast<void>(data[offset]);
+  }
+  if (!piece.empty() && (piece.size() - 1) % kTouchStride != 0) {
+    static_cast<void>(data[piece.size() - 1]);
+  }
+}
 
 absl::Status ReadIntoUint64(PReadFile& file, size_t offset,
                             absl::Span<uint64_t> value) {
@@ -56,6 +78,24 @@ absl::Status ReadIntoUint64(PReadFile& file, size_t offset,
 }
 
 }  // namespace
+
+absl::Status SackliShardReader::WarmLimits() const {
+  const size_t limits_size = limits_->size();
+  for (size_t offset = 0; offset < limits_size;) {
+    const size_t num_bytes =
+        std::min(kWarmLimitsReadBytes, limits_size - offset);
+    if (absl::Status status = limits_->PRead(
+            offset, num_bytes, [](absl::string_view piece) {
+              TouchForWarm(piece);
+              return true;
+            });
+        !status.ok()) {
+      return status;
+    }
+    offset += num_bytes;
+  }
+  return absl::OkStatus();
+}
 
 absl::StatusOr<SackliShardReader::ByteRange> SackliShardReader::ReadByteRange(
     size_t index) const {

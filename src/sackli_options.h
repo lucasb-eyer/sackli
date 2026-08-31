@@ -60,7 +60,7 @@ enum class ShardingLayout {
 // from disk or from RAM.
 enum class LimitsStorage {
   kOnDisk,    // Limits are read from disk each time.
-  kInMemory,  // Limits are copied from disk to RAM once and read from there.
+  kInMemory,  // Each shard's limits are copied to RAM on first use.
 };
 
 }  // namespace sackli

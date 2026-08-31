@@ -520,6 +520,7 @@ def test_reader_close(tmp_path: Path) -> None:
       lambda: len(reader),
       lambda: reversed(reader),
       lambda: reader.read(),
+      lambda: reader.warm_limits(),
       lambda: reader.read_indices([0]),
       lambda: reader.approximate_bytes_per_record(),
       lambda: iter(reader),
@@ -542,6 +543,29 @@ def test_reader_close(tmp_path: Path) -> None:
   with sackli.Reader(file) as ctx_reader:
     assert ctx_reader[0] == records[0]
   assert ctx_reader.closed
+
+
+@pytest.mark.parametrize('limits_placement', _LIMITS_PLACEMENTS)
+@pytest.mark.parametrize('limits_storage', _LIMITS_STORAGES)
+def test_warm_limits(
+    tmp_path: Path,
+    limits_placement: sackli.LimitsPlacement,
+    limits_storage: sackli.LimitsStorage,
+) -> None:
+  file = tmp_path / 'warm.bag'
+  records = list(_generate_records(_NUM_RECORDS))
+  with sackli.Writer(file, limits_placement=limits_placement) as writer:
+    for record in records:
+      writer.write(record)
+
+  reader = sackli.Reader(
+      file,
+      limits_placement=limits_placement,
+      limits_storage=limits_storage,
+  )
+  assert reader.warm_limits() is None
+  assert reader.warm_limits() is None
+  assert list(reader) == records
 
 
 def test_error_mapping(tmp_path: Path) -> None:

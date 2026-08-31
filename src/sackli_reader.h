@@ -53,8 +53,8 @@ class SackliReader {
     // Whether to decompress the records with ZSTD after reading them.
     Compression compression = CompressionAutoDetect{};
 
-    // Whether to read the limits from disk for every read or to cache the
-    // limits in memory.
+    // Whether to read the limits from disk for every read or to cache each
+    // shard's limits in memory on first use.
     LimitsStorage limits_storage = LimitsStorage::kOnDisk;
 
     // Hint for how records are expected to be read from local files.
@@ -121,6 +121,22 @@ class SackliReader {
   // This is an accurate value when the reader is created. When the reader is
   // sliced this value is not updated and becomes an estimate.
   double ApproximateNumBytesPerRecord() const;
+
+  // Synchronously reads the limits sections for all shards backing this
+  // reader, without reading record payloads. Shards are warmed sequentially to
+  // avoid creating an I/O burst.
+  //
+  // With LimitsStorage::kInMemory, this forces the lazily populated, private
+  // limits cache to be allocated. With LimitsStorage::kOnDisk, this reads and
+  // touches the limits so normal POSIX files are brought into the host's shared
+  // filesystem page cache. The latter is useful for a coordinated, once-per-
+  // host warm-up before several processes read the same data, especially over
+  // a network filesystem.
+  //
+  // This method does not coordinate between processes and cannot guarantee
+  // that the operating system retains warmed pages. Calling it on a slice
+  // warms every shard in the underlying file-set shared with that slice.
+  absl::Status WarmLimits() const;
 
   // Returns the record at the given index.
   absl::StatusOr<std::string> operator[](size_t index) const;

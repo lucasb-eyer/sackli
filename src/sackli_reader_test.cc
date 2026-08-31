@@ -29,10 +29,12 @@
 #include <vector>
 
 #include "absl/base/nullability.h"
+#include "absl/functional/function_ref.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/match.h"
+#include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "src/file/file.h"
@@ -122,6 +124,103 @@ class RecordingFileSystem : public FileSystem {
   }
 
   mutable std::vector<Call> calls;
+};
+
+struct ReadStats {
+  std::atomic<size_t> calls = 0;
+  std::atomic<size_t> bytes = 0;
+};
+
+class CountingPReadFile : public StringPReadFile {
+ public:
+  CountingPReadFile(std::string content, std::shared_ptr<ReadStats> stats)
+      : StringPReadFile(std::move(content)), stats_(std::move(stats)) {}
+
+  absl::Status PRead(
+      size_t offset, size_t num_bytes,
+      absl::FunctionRef<bool(absl::string_view)> callback) const override {
+    stats_->calls.fetch_add(1, std::memory_order_relaxed);
+    stats_->bytes.fetch_add(num_bytes, std::memory_order_relaxed);
+    return StringPReadFile::PRead(offset, num_bytes, callback);
+  }
+
+ private:
+  std::shared_ptr<ReadStats> stats_;
+};
+
+// Supplies two separate-limits shards and records every byte read from the
+// record and limits files independently.
+class WarmRecordingFileSystem : public FileSystem {
+ public:
+  WarmRecordingFileSystem()
+      : record_stats_{std::make_shared<ReadStats>(),
+                      std::make_shared<ReadStats>()},
+        limits_stats_{std::make_shared<ReadStats>(),
+                      std::make_shared<ReadStats>()} {
+    FileSystemRegistry::Instance().Register("warm_fs:", *this).IgnoreError();
+  }
+
+  ~WarmRecordingFileSystem() override {
+    FileSystemRegistry::Instance().Unregister("warm_fs:").IgnoreError();
+  }
+
+  absl::StatusOr<absl_nonnull std::unique_ptr<PReadFile>> OpenPRead(
+      absl::string_view filename_without_prefix,
+      const PReadOpenOptions& options) const override {
+    return absl::UnimplementedError("OpenPRead should not be called");
+  }
+
+  absl::StatusOr<absl_nonnull std::unique_ptr<WriteFile>> OpenWrite(
+      absl::string_view filename_without_prefix, uint64_t offset,
+      absl::string_view options) const override {
+    return absl::UnimplementedError("OpenWrite should not be called");
+  }
+
+  absl::Status Delete(absl::string_view filename_without_prefix,
+                      absl::string_view options) const override {
+    return absl::UnimplementedError("Delete should not be called");
+  }
+
+  absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>>
+  BulkOpenPRead(absl::string_view filespec_without_prefix,
+                const PReadOpenOptions& options,
+                int max_parallelism) const override {
+    std::vector<absl_nonnull std::unique_ptr<PReadFile>> files;
+    for (absl::string_view filename :
+         absl::StrSplit(filespec_without_prefix, ',')) {
+      const bool is_limits = absl::ConsumePrefix(&filename, "limits.");
+      size_t shard;
+      if (filename == "a.bag") {
+        shard = 0;
+      } else if (filename == "b.bag") {
+        shard = 1;
+      } else {
+        return absl::InvalidArgumentError("Unexpected warm test filename");
+      }
+      if (is_limits) {
+        // Each shard contains one record, ending at byte 3 or 4.
+        std::string limits(sizeof(uint64_t), '\0');
+        limits[0] = static_cast<char>(shard == 0 ? 3 : 4);
+        files.push_back(std::make_unique<CountingPReadFile>(
+            std::move(limits), limits_stats_[shard]));
+      } else {
+        files.push_back(std::make_unique<CountingPReadFile>(
+            shard == 0 ? "abc" : "wxyz", record_stats_[shard]));
+      }
+    }
+    return files;
+  }
+
+  const ReadStats& record_stats(size_t shard) const {
+    return *record_stats_[shard];
+  }
+  const ReadStats& limits_stats(size_t shard) const {
+    return *limits_stats_[shard];
+  }
+
+ private:
+  std::vector<std::shared_ptr<ReadStats>> record_stats_;
+  std::vector<std::shared_ptr<ReadStats>> limits_stats_;
 };
 
 class RecordingPosixFileSystem : public PosixFileSystem {
@@ -287,6 +386,85 @@ std::string MakeTailBag(absl::Span<const absl::string_view> records) {
     AppendLittleEndianUint64(bag, limit);
   }
   return bag;
+}
+
+bool TestWarmLimitsReadsNoRecords(LimitsStorage limits_storage,
+                                  absl::string_view test_name) {
+  WarmRecordingFileSystem file_system;
+  absl::StatusOr<SackliReader> reader = SackliReader::Open(
+      "warm_fs:a.bag,warm_fs:b.bag",
+      SackliReader::Options{
+          .limits_placement = LimitsPlacement::kSeparate,
+          .compression = CompressionNone{},
+          .limits_storage = limits_storage,
+      });
+  if (!Expect(reader.ok(),
+              absl::StrCat(test_name, ": open failed: ",
+                           reader.status().message()))) {
+    return false;
+  }
+  for (size_t shard = 0; shard < 2; ++shard) {
+    if (!Expect(file_system.record_stats(shard).calls.load() == 0 &&
+                    file_system.limits_stats(shard).calls.load() == 0,
+                absl::StrCat(test_name, ": open unexpectedly read shard ",
+                             shard))) {
+      return false;
+    }
+  }
+
+  // A slice still warms the complete shared file-set, including shard 1.
+  absl::StatusOr<SackliReader> slice = reader->Slice(0, 1, 1);
+  if (!Expect(slice.ok() && slice->WarmLimits().ok(),
+              absl::StrCat(test_name, ": warm failed"))) {
+    return false;
+  }
+  for (size_t shard = 0; shard < 2; ++shard) {
+    if (!Expect(file_system.record_stats(shard).calls.load() == 0,
+                absl::StrCat(test_name, ": warm read records from shard ",
+                             shard)) ||
+        !Expect(file_system.limits_stats(shard).calls.load() == 1 &&
+                    file_system.limits_stats(shard).bytes.load() ==
+                        sizeof(uint64_t),
+                absl::StrCat(test_name,
+                             ": warm did not read all limits from shard ",
+                             shard))) {
+      return false;
+    }
+  }
+
+  if (!Expect(reader->WarmLimits().ok(),
+              absl::StrCat(test_name, ": second warm failed"))) {
+    return false;
+  }
+  const size_t expected_calls =
+      limits_storage == LimitsStorage::kInMemory ? 1 : 2;
+  const size_t expected_bytes = expected_calls * sizeof(uint64_t);
+  for (size_t shard = 0; shard < 2; ++shard) {
+    if (!Expect(file_system.record_stats(shard).calls.load() == 0,
+                absl::StrCat(test_name,
+                             ": second warm read records from shard ",
+                             shard)) ||
+        !Expect(file_system.limits_stats(shard).calls.load() ==
+                        expected_calls &&
+                    file_system.limits_stats(shard).bytes.load() ==
+                        expected_bytes,
+                absl::StrCat(test_name,
+                             ": unexpected repeated-warm behavior at shard ",
+                             shard))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool TestWarmLimitsReadsNoRecordsInMemory() {
+  return TestWarmLimitsReadsNoRecords(LimitsStorage::kInMemory,
+                                      "warm-limits-in-memory");
+}
+
+bool TestWarmLimitsReadsNoRecordsOnDisk() {
+  return TestWarmLimitsReadsNoRecords(LimitsStorage::kOnDisk,
+                                      "warm-limits-on-disk");
 }
 
 bool TestTailUsesSeparateLimitHandlesForPosixFiles() {
@@ -868,6 +1046,11 @@ bool TestScanRecordsAllowsSingleRecordBatches() {
 
 bool TestClosedReaderOperationsFail() {
   SackliReader reader;
+  if (!Expect(reader.WarmLimits().code() ==
+                  absl::StatusCode::kFailedPrecondition,
+              "closed-reader: WarmLimits should fail")) {
+    return false;
+  }
   const SackliReader::Handle handle{};
   absl::StatusOr<std::string> record = reader.ReadFromHandle(handle);
   if (!Expect(record.status().code() ==
@@ -891,6 +1074,8 @@ bool TestClosedReaderOperationsFail() {
 
 int RunTests() {
   const bool ok = TestBulkOpenHonorsMaxParallelism() &&
+                  TestWarmLimitsReadsNoRecordsInMemory() &&
+                  TestWarmLimitsReadsNoRecordsOnDisk() &&
                   TestTailUsesSeparateLimitHandlesForPosixFiles() &&
                   TestTailUsesSeparateLimitHandlesForDirectIoPosixFiles() &&
                   TestTailReusesRecordHandleForAccessPatternOnly() &&

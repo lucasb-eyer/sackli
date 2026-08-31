@@ -69,6 +69,14 @@ class SackliShardReader {
   // Recall that `*this` must not be in the empty state.
   size_t num_bytes() const { return records_->size(); }
 
+  // Synchronously reads the complete limits section without reading any
+  // records. Reads are issued in bounded chunks and the returned memory is
+  // touched so mmap-backed files are actually faulted into the page cache.
+  //
+  // This forces a lazy in-memory limits file to materialize and warms the
+  // filesystem cache for an on-disk limits file.
+  absl::Status WarmLimits() const;
+
   // Invokes `callback` with a view of the record at the given index. The
   // `record` parameter is not valid after the callback returns. The index
   // must be less than `size()`.

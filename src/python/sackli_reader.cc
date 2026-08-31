@@ -225,7 +225,7 @@ Args:
     TAIL.
   compression: Compression algorithm to use defaulting to auto-detection.
   limits_storage: Whether to read the limits from disk for every read or to
-    cache the limits in memory.
+    cache each shard's limits in memory on first use.
   max_parallelism: Maximum number of threads to use for operations that can be
     parallelized.
   access_pattern: Hint for how records are expected to be read from local
@@ -262,6 +262,27 @@ Closes this reader handle; further operations on it raise ValueError.
 The underlying files are closed once the last handle sharing them (this
 reader, slices made from it, and any live iterators) is closed or garbage
 collected. Do not call concurrently with in-flight reads on this handle.
+)";
+
+constexpr char kWarmLimitsDoc[] = R"(
+Synchronously warms every limits section without reading record payloads.
+
+Limits map record indices to byte offsets. Warming them explicitly is useful
+before releasing several worker processes that will read the same file-set,
+especially when the files are on a network filesystem.
+
+With ``limits_storage="on_disk"``, this reads and touches all limits. On normal
+POSIX filesystems that brings their pages into the host-wide filesystem cache,
+which processes on that host can share. Callers must provide their own
+once-per-host coordination; this method does not synchronize separate
+processes, and the operating system may evict the pages later.
+
+With ``limits_storage="in_memory"``, this forces all lazy limits caches to be
+materialized in this reader's process. Those private copies are not shared with
+independently launched processes and require eight bytes per record.
+
+Shards are warmed sequentially to avoid generating a burst of concurrent I/O.
+Calling this method on a sliced reader warms the complete underlying file-set.
 )";
 
 // Applies one Reader.Options field given as a keyword argument.
@@ -860,6 +881,14 @@ void RegisterSackliReader(py::module& m) {
              return reader.size();
            })
       .def("close", &SackliReader::Close, py::doc(kCloseDoc + 1))
+      .def(
+          "warm_limits",
+          [](const SackliReader& reader) {
+            EnsureOpen(reader);
+            py::gil_scoped_release release;
+            internal::ThrowIfNotOk(reader.WarmLimits());
+          },
+          py::doc(kWarmLimitsDoc + 1))
       .def_property_readonly("closed", &SackliReader::IsClosed,
                              "Whether this reader handle has been closed.")
       .def("__enter__",

@@ -14,6 +14,7 @@
 
 #include "src/sackli_reader.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -63,6 +64,8 @@ struct ReaderOpenHandles {
 using ReaderHandleBatch = std::vector<ReaderOpenHandles>;
 using ReaderFilePair =
     std::pair<std::unique_ptr<PReadFile>, std::unique_ptr<PReadFile>>;
+
+constexpr size_t kInMemoryLimitsReadBytes = 64 * 1024 * 1024;
 
 PReadOpenOptions RecordFileOpenOptions(const SackliReader::Options& options) {
   return PReadOpenOptions{
@@ -309,13 +312,22 @@ class InMemoryPReadFile : public PReadFile {
 
   void InitOnce() {
     data_ = std::make_unique_for_overwrite<char[]>(data_size_);
-    char* data = data_.get();
-    status_ =
-        pread_file_->PRead(0, data_size_, [&data](absl::string_view piece) {
-          std::memcpy(data, piece.data(), piece.size());
-          data += piece.size();
-          return true;
-        });
+    status_ = absl::OkStatus();
+    for (size_t offset = 0; offset < data_size_;) {
+      const size_t num_bytes =
+          std::min(kInMemoryLimitsReadBytes, data_size_ - offset);
+      char* data = data_.get() + offset;
+      status_ = pread_file_->PRead(
+          offset, num_bytes, [&data](absl::string_view piece) {
+            std::memcpy(data, piece.data(), piece.size());
+            data += piece.size();
+            return true;
+          });
+      if (!status_.ok()) {
+        break;
+      }
+      offset += num_bytes;
+    }
     pread_file_.reset();
     if (!status_.ok()) {
       data_ = nullptr;
@@ -367,6 +379,20 @@ struct SackliReader::State {
   }
 
   [[nodiscard]] size_t size() const { return shard_indexing_.size(); }
+
+  absl::Status WarmLimits() const {
+    // Intentional serial traversal: this API exists in part so callers can
+    // coordinate one gentle warm-up instead of causing synchronized shard
+    // reads from many workers.
+    for (size_t shard = 0; shard < shards_.size(); ++shard) {
+      if (absl::Status status = shards_[shard].WarmLimits(); !status.ok()) {
+        return absl::Status(
+            status.code(),
+            absl::StrCat(status.message(), "; while warming shard ", shard));
+      }
+    }
+    return absl::OkStatus();
+  }
 
   absl::Status ReadWithAllocator(
       size_t index,
@@ -691,6 +717,13 @@ size_t SackliReader::size() const { return slice_length_; }
 
 double SackliReader::ApproximateNumBytesPerRecord() const {
   return state_ == nullptr ? 0.0 : state_->ApproximateNumBytesPerRecord();
+}
+
+absl::Status SackliReader::WarmLimits() const {
+  if (state_ == nullptr) {
+    return absl::FailedPreconditionError("Reader is closed.");
+  }
+  return state_->WarmLimits();
 }
 
 absl::StatusOr<std::string> SackliReader::operator[](size_t index) const {

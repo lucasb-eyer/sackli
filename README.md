@@ -8,6 +8,8 @@ Additions so far:
     - On POSIX filesystems, this can add `mmap` hints or use `pread`-based no-cache reads to optimize for random access and larger-than-RAM data.
     - On Linux, support `O_DIRECT` for even better reading of random access and larger-than-RAM data.
     - On macOS, support `F_NOCACHE`, `MAP_NOCACHE`, and `madvise`-based cache hints on Apple silicon.
+- Add explicit limits warming for coordinated multi-process and network-filesystem
+  workloads.
 - Make it compatible to Python versions past 3.13.
 - Make it compatible with free-threading (nogil) Python.
 - Add macOS support and wheels.
@@ -132,6 +134,51 @@ with sackli.Reader('/path/to/data.bagz') as data:
   first = data[0]
 ```
 
+#### Warming limits before multi-process reads
+
+Every record has an eight-byte limit entry that maps its index to its byte
+range. Large datasets can therefore have limits sections measured in
+gigabytes. Normally limits are read lazily: this avoids startup work, but many
+worker processes starting together can all first-touch the same limits at once.
+That synchronized traffic is particularly undesirable when the files are on
+NFS or another network filesystem.
+
+`Reader.warm_limits()` synchronously reads every shard's limits, without
+reading any record payloads. Shards are warmed sequentially so that one warm-up
+does not itself fan out into a burst of shard reads.
+
+For several processes on one machine, use `limits_storage="on_disk"` and have
+one designated process call `warm_limits()` before the other workers begin:
+
+```python
+# Run once per machine, behind a node-local leader election or startup lock.
+warmup_reader = sackli.Reader(
+    '/path/on/nfs/data@1000.bagz',
+    limits_storage='on_disk',
+)
+warmup_reader.warm_limits()
+
+# Signal the other processes on this machine only after warming completes.
+```
+
+For normal POSIX files, `ON_DISK` limits use the filesystem page cache, so the
+warmed pages can be reused by other processes on the same machine. The cache is
+not shared between machines, and the operating system may evict pages under
+memory pressure. `warm_limits()` does not perform leader election or
+inter-process synchronization; callers must arrange the once-per-machine
+coordination themselves.
+
+With `limits_storage="in_memory"`, `warm_limits()` instead forces every shard's
+lazy private limits cache to be populated immediately. This can make later
+access latency predictable, but independently launched processes do not share
+those copies. Each process needs eight bytes per record: two billion records,
+for example, require about 16 GB (14.9 GiB) per process just for cached limits.
+
+Calling `warm_limits()` on a sliced reader warms the complete underlying
+file-set shared by the slice. Repeating it in `IN_MEMORY` mode does not reload
+already populated limits; repeating it in `ON_DISK` mode reads the limits again
+and can be used to re-warm pages that may have been evicted.
+
 #### Python Reader - `Index` and `MultiIndex`
 
 You can use `Index` to find the first index of a record and `MultiIndex` to find
@@ -198,7 +245,10 @@ accept the case-insensitive name of an enum value (e.g. `'random'`,
 *   `limits_storage`: Can be one of:
     *   `sackli.LimitsStorage.ON_DISK`: Default - Reads limits from disk for each
         read.
-    *   `sackli.LimitsStorage.IN_MEMORY`: Reads all limits from disk in one go.
+    *   `sackli.LimitsStorage.IN_MEMORY`: On the first limits access to each
+        shard, reads that shard's complete limits section into a private
+        in-process cache. Use `reader.warm_limits()` to populate all shard
+        caches explicitly.
 *   `access_pattern`: Can be one of:
     *   `sackli.AccessPattern.SYSTEM`: Default - no specific hint to the OS.
     *   `sackli.AccessPattern.RANDOM`: Hints that you read entries in random order.
